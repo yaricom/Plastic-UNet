@@ -91,10 +91,10 @@ class UNetp(nn.Module):
         return Variable(torch.zeros(self.nbf, self.n_classes).type(ttype))
 
 class double_conv(nn.Module):
-    ""
+    """
     Creates two subsequent unpadded convolution layers with 3x3 kernel size
     followed by batch normalization (optional) and ReLU
-    ""
+    """
     def __init__(self, in_ch, out_ch, batch_norm=True):
         super(double_conv, self).__init__()
         if batch_norm:
