@@ -5,12 +5,13 @@ import torch.nn.functional as F
 
 
 class UNetp(nn.Module):
-    def __init__(self, n_channels, n_classes, alfa='free', rule='hebb', nbf=(128*128)):
+    def __init__(self, n_channels, n_classes, device, alfa='free', rule='hebb', nbf=(128*128)):
         """
         Creates new U-Net network with plastic learning rule implemented
         Arguments:
             n_channels: The number of input n_channels
             n_classes: The number of ouput classes to be learned
+            device: The torch device to execute tensor operations
             alfa: The plasticity coefficient ['free', 'yoked'] (if the latter, alpha is a single scalar learned parameter, shared across all connection)
             rule: The name of plasticity rule to apply ['hebb', 'oja'] (The Oja rule can maintain stable weight values indefinitely in the absence of stimulation, thus allowing stable long-term memories, while still preventing runaway divergences)
             nbf: The number of features in plasticity rule vector (width * height)
@@ -19,16 +20,12 @@ class UNetp(nn.Module):
         self.n_classes = n_classes
         self.n_channels = n_channels
         self.nbf = nbf # the number of features to be used for plastic rule learning
+        self.torch_dev = device
 
         # The plastic rule paprameters to be learned
-        if torch.cuda.is_available():
-            self.w =  torch.nn.Parameter((.01 * torch.randn(self.nbf, self.n_classes)).cuda(), requires_grad=True) # Fixed weights
-            self.alpha =  torch.nn.Parameter((.01 * torch.rand(self.nbf, self.n_classes)).cuda(), requires_grad=True) # Plasticity coeffs.
-            self.eta = torch.nn.Parameter((.01 * torch.ones(1)).cuda(), requires_grad=True)  # The “learning rate” of plasticity (the same for all connections)
-        else:
-            self.w =  torch.nn.Parameter((.01 * torch.randn(self.nbf, self.n_classes)), requires_grad=True)
-            self.alpha =  torch.nn.Parameter((.01 * torch.rand(self.nbf, self.n_classes)), requires_grad=True)
-            self.eta = torch.nn.Parameter((.01 * torch.ones(1)), requires_grad=True)
+        self.w =  torch.nn.Parameter((.01 * torch.randn(self.nbf, self.n_classes, device=self.torch_dev)), requires_grad=True) # Fixed weights
+        self.alpha =  torch.nn.Parameter((.01 * torch.rand(self.nbf, self.n_classes, device=self.torch_dev)), requires_grad=True) # Plasticity coeffs.
+        self.eta = torch.nn.Parameter((.01 * torch.ones(1, device=self.torch_dev)), requires_grad=True)  # The “learning rate” of plasticity (the same for all connections)
 
 
         # The DOWN network structure
@@ -86,10 +83,10 @@ class UNetp(nn.Module):
         """
         Creates variable to store Hebbian plastisity coefficients
         """
-        if torch.cuda.is_available():
-            ttype = torch.cuda.FloatTensor
-        else:
+        if self.torch_dev.type == 'cpu':
             ttype = torch.FloatTensor
+        else:
+            ttype = torch.cuda.FloatTensor
 
         return Variable(torch.zeros(self.nbf, self.n_classes).type(ttype))
 
