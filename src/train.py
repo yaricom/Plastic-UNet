@@ -2,16 +2,11 @@
 
 import sys
 import os
-import random
+
 import warnings
 from optparse import OptionParser
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-from skimage.io import imread, imshow, concatenate_images
-from skimage.transform import resize
-from skimage.morphology import label
+import h5py
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -21,6 +16,7 @@ from torch import optim
 from torch.optim import lr_scheduler
 
 from unet import UNetp
+from utils import plot_train_check
 
 # Set some parameters
 im_width = 128
@@ -28,7 +24,7 @@ im_height = 128
 im_chan = 3
 
 def train(net,
-          data_dir,
+          dataset_file,
           out_dir,
           epochs=5,
           lr=0.1,
@@ -40,7 +36,7 @@ def train(net,
     Starts network training
     Arguments:
         net: The network to be trained
-        data_dir: The directory to get input data from
+        dataset_file: The dataset file to get input data from
         out_dir: The output directory to store execution results
         epochs: The number of training epochs
         val_ratio: The ratio of training data to be used for validation
@@ -48,35 +44,19 @@ def train(net,
         gamma: The annealing factor of learning rate decay for Adam
         steplr: How often should we change the learning rate
     """
-    train_ids = next(os.walk(data_dir + "/images"))[2]
-
-    # Get and resize train images and masks
-    X_train = np.zeros((len(train_ids), im_height, im_width, im_chan), dtype=np.float64)
-    Y_train = np.zeros((len(train_ids), im_height, im_width, 1), dtype=np.bool)
-    print('Getting and resizing train images and masks ... ')
+    # Get train images and masks
+    print('Getting train images and masks from dataset ')
     sys.stdout.flush()
-    for n, id_ in enumerate(train_ids):
-        path = data_dir
-        x = load_image(path + '/images/' + id_, (128, 128, im_chan))
-        X_train[n] = x
-        mask = load_image(path + '/masks/' + id_, (128, 128, 1))
-        Y_train[n] = mask
+    with h5py.File(dataset_file, 'r') as f:
+        X_train = f['train/images'][()]
+        Y_train = f['train/masks'][()]
 
     print('Done!')
 
     #
     # Check if training data looks all right
     #
-    ix = random.randint(0, len(train_ids))
-    fig = plt.figure()
-    a = fig.add_subplot(1, 2, 1)
-    imgplot = plt.imshow(X_train[ix])
-    a.set_title('Image')
-    a = fig.add_subplot(1, 2, 2)
-    tmp = np.squeeze(Y_train[ix]).astype(np.float32)
-    plt.imshow(np.dstack((tmp,tmp,tmp)))
-    a.set_title('Mask')
-    plt.show()
+    plot_train_check(X_train, Y_train)
 
     #
     # Initialize optimizer
@@ -84,12 +64,6 @@ def train(net,
     print("Initializing optimizer")
     optimizer = torch.optim.Adam(net.parameters(), lr=1.0*lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, gamma=gamma, step_size=steplr)
-
-
-def load_image(path, output_shape):
-    img = imread(path)
-    x = resize(img, output_shape, mode='constant')
-    return x
 
 def parse_args():
     """
@@ -106,8 +80,8 @@ def parse_args():
                       default=False, help='load file model')
     parser.add_option('--save_every', dest='save_every', default=5, type='int',
                       help='save results per specified number of epochs')
-    parser.add_option('-i', '--data', dest='data_dir', type='string',
-                      help='the path to the directory with input data')
+    parser.add_option('-i', '--data', dest='data_file', type='string',
+                      help='the path to the dataset file with input data')
     parser.add_option('-o', '--out', dest='out_dir', type='string',
                       help='the path to the directory for results ouput')
     parser.add_option('-s', '--scale', dest='scale', type='float',
@@ -135,7 +109,7 @@ if __name__ == '__main__':
 
     try:
         train(net=net,
-              data_dir=args.data_dir,
+              dataset_file=args.data_file,
               out_dir=args.out_dir,
               epochs=args.epochs,
               lr=args.lr,
