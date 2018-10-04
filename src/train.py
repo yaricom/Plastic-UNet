@@ -18,6 +18,7 @@ from torch import optim
 from unet import UNetp
 from utils import plot_train_check
 from utils import hwc_to_chw
+from eval import eval_net
 
 # Set some parameters
 im_width = 128
@@ -32,7 +33,7 @@ def train(net,
           epochs=5,
           lr=0.1,
           val_ratio=0.05,
-          val_every=5,
+          val_every=2,
           save_every=5000,
           gamma=0.666,
           steplr=1e6):
@@ -77,6 +78,19 @@ def train(net,
     y_val = list(map(hwc_to_chw, y_val))
 
     #
+    # The data accumulators
+    #
+    # The loss values collected over each execution
+    all_losses = []
+
+    # The data values collected per epoch when validation happens
+    val_train_losses = []
+    val_test_losses = []
+    val_accuracies = []
+
+    samples_count = len(X_train)
+
+    #
     # Initialize optimizer
     #
     print("Initializing optimizer")
@@ -89,39 +103,59 @@ def train(net,
         if debug:
             print('Starting epoch %d/%d.' % (epoch + 1, epochs))
 
+        net.train()
+
         # Initialize Hebbian with zero values for new epoch
         hebb = net.initialZeroHebb()
 
-        epoch_loss = 0
-
-        net.train()
         # Enumerate over samples and do train
         for img, mask in zip(X_train, y_train):
+            optimizer.zero_grad()
+
             t_img = torch.from_numpy(np.array([img.astype(np.float32)])).to(device)
             y_target = torch.from_numpy(mask.astype(np.float32)).to(device)
 
             # Starting each sample, we detach the Hebbian state from how it was previously produced.
             # If we didn't, the model would try backpropagating all the way to start of the dataset.
-            y_pred, hebb = net(t_img, Variable(hebb))
+            y_pred, hebb = net(Variable(t_img, requires_grad=False), Variable(hebb, requires_grad=False))
 
             y_pred_flat = y_pred.view(-1)
             y_target_flat = y_target.view(-1)
 
             # compute loss
             loss = criterion(y_pred_flat, Variable(y_target_flat, requires_grad=False))
-            epoch_loss += loss.item()
+            loss_num = loss.item()
+            all_losses.append(loss_num)
 
-            print("Loss: %s, epoch loss: %f" % (loss.item(), epoch_loss))
+            print(loss_num)
 
             # Compute the gradients
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             scheduler.step()
 
-        if debug:
-            print('Epoch finished ! Loss: {}'.format(epoch_loss / len(X_train)))
 
+        epoch_loss = np.mean(all_losses[-samples_count])
+        if debug:
+            print('Epoch finished ! Loss: {}'.format(epoch_loss))
+
+        #
+        # Perform validation
+        #
+        if (epoch + 1) % val_every == 0:
+            val_acc, val_loss = eval_net(net, X_val, y_val, device, nn.BCELoss())
+            print('Validation accuracy: %f, loss: %f' % (val_acc, val_loss))
+
+            # store loss values
+            val_train_losses.append(epoch_loss)
+            val_test_losses.append(val_loss)
+            val_accuracies.append(val_acc)
+
+
+        #
+        # Save checkpoint if appropriate
+        #
+        #if epoch + 1 % save_every == 0:
 
 
 def parse_args():
