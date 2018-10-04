@@ -2,17 +2,18 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
 
 
 class UNetp(nn.Module):
-    def __init__(self, n_channels, n_classes, device, alfa='free', rule='hebb', nbf=(128*128)):
+    def __init__(self, n_channels, n_classes, device, alfa_type='free', rule='hebb', nbf=128):
         """
         Creates new U-Net network with plastic learning rule implemented
         Arguments:
             n_channels: The number of input n_channels
             n_classes: The number of ouput classes to be learned
             device: The torch device to execute tensor operations
-            alfa: The plasticity coefficient ['free', 'yoked'] (if the latter, alpha is a single scalar learned parameter, shared across all connection)
+            alfa_type: The plasticity coefficient ['free', 'yoked'] (if the latter, alpha is a single scalar learned parameter, shared across all connection)
             rule: The name of plasticity rule to apply ['hebb', 'oja'] (The Oja rule can maintain stable weight values indefinitely in the absence of stimulation, thus allowing stable long-term memories, while still preventing runaway divergences)
             nbf: The number of features in plasticity rule vector (width * height)
         """
@@ -21,10 +22,12 @@ class UNetp(nn.Module):
         self.n_channels = n_channels
         self.nbf = nbf # the number of features to be used for plastic rule learning
         self.torch_dev = device
+        self.alfa_type = alfa_type
+        self.rule = rule
 
         # The plastic rule paprameters to be learned
-        self.w =  torch.nn.Parameter((.01 * torch.randn(self.nbf, self.n_classes, device=self.torch_dev)), requires_grad=True) # Fixed weights
-        self.alpha =  torch.nn.Parameter((.01 * torch.rand(self.nbf, self.n_classes, device=self.torch_dev)), requires_grad=True) # Plasticity coeffs.
+        self.w =  torch.nn.Parameter((.01 * torch.randn(self.nbf, self.nbf, device=self.torch_dev)), requires_grad=True) # Fixed weights
+        self.alpha =  torch.nn.Parameter((.01 * torch.rand(self.nbf, self.nbf, device=self.torch_dev)), requires_grad=True) # Plasticity coeffs.
         self.eta = torch.nn.Parameter((.01 * torch.ones(1, device=self.torch_dev)), requires_grad=True)  # The “learning rate” of plasticity (the same for all connections)
 
 
@@ -42,8 +45,8 @@ class UNetp(nn.Module):
         self.outc = outconv(64, n_classes)
 
     def forward(self, x, hebb):
-        if x.size()[0] != 1:
-            raise ValueError("Only batch size: 1 is supported")
+        if x.shape[0] != 1:
+            raise ValueError("Only batch size: 1 is supported, but was: %d" % x.shape[0])
 
         x1 = self.inc(x)
         x2 = self.down1(x1)
@@ -57,23 +60,21 @@ class UNetp(nn.Module):
         x = self.outc(x)
 
         # The Plasticity rule implementation
-        activin = activ.view(-1) # The batch size assumed to be 1
-        if activin.size()[0] != self.nbf:
-            raise RuntimeError('The convolution ouput has wrong size: %d, when expected: %d' % (activin.size()[0], self.nbf))
+        activin = x.view(self.nbf, self.nbf) # The batch size assumed to be 1
 
-        if self.alfa == 'free':
+        if self.alfa_type == 'free':
             activ = activin.mm(self.w + torch.mul(self.alpha, hebb))
-        elif self.alfa == 'yoked':
+        elif self.alfa_type == 'yoked':
             activ = activin.mm(self.w + self.alpha * hebb)
         else:
             raise ValueError("Must select one plasticity coefficient type ('free' or 'yoked')")
 
-        activout = F.sigmoid(activ)
+        activout = torch.sigmoid(activ)
 
         if self.rule == 'hebb':
-            hebb = (1 - self.eta) * hebb + self.eta * torch.bmm(activin, activout) # bmm used to implement outer product;
+            hebb = (1 - self.eta) * hebb + self.eta * torch.bmm(activin.unsqueeze(2), activout.unsqueeze(1))[0] # bmm used to implement outer product; remember activs have a leading singleton dimension
         elif self.rule == 'oja':
-            hebb = hebb + self.eta * torch.mul((activin - torch.mul(hebb , activout)) , activout)
+            hebb = hebb + self.eta * torch.mul((activin[0].unsqueeze(1) - torch.mul(hebb, activout[0].unsqueeze(0))), activout[0].unsqueeze(0)) # Oja's rule. Remember that yin, yout are row vectors (dim (1,N)). Also, broadcasting!
         else:
             raise ValueError("Must select one learning rule ('hebb' or 'oja')")
 
@@ -88,7 +89,7 @@ class UNetp(nn.Module):
         else:
             ttype = torch.cuda.FloatTensor
 
-        return Variable(torch.zeros(self.nbf, self.n_classes).type(ttype))
+        return torch.zeros(self.nbf, self.nbf).type(ttype)
 
 class double_conv(nn.Module):
     """
