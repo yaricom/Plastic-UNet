@@ -84,12 +84,7 @@ class UNetp(nn.Module):
         """
         Creates variable to store Hebbian plastisity coefficients
         """
-        if self.torch_dev.type == 'cpu':
-            ttype = torch.FloatTensor
-        else:
-            ttype = torch.cuda.FloatTensor
-
-        return torch.zeros(self.nbf, self.nbf).type(ttype)
+        return torch.zeros(self.nbf, self.nbf, dtype=torch.float, device=self.torch_dev)
 
 class double_conv(nn.Module):
     """
