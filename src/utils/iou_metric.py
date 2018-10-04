@@ -4,8 +4,8 @@ import numpy as np
 
 
 def iou_metric(y_true_in, y_pred_in, print_table=False):
-    labels = label(y_true_in > 0.5)
-    y_pred = label(y_pred_in > 0.5)
+    labels = np.array(y_true_in > 0.5).astype(np.float64)
+    y_pred = np.array(y_pred_in > 0.5).astype(np.float64)
 
     true_objects = len(np.unique(labels))
     pred_objects = len(np.unique(y_pred))
