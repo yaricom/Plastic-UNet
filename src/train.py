@@ -7,28 +7,32 @@ import warnings
 from optparse import OptionParser
 
 import h5py
+from sklearn.model_selection import train_test_split
+import numpy as np
 
 import torch
-import torch.backends.cudnn as cudnn
 import torch.nn as nn
-import torch.nn.functional as F
+from torch.autograd import Variable
 from torch import optim
-from torch.optim import lr_scheduler
 
 from unet import UNetp
 from utils import plot_train_check
+from utils import hwc_to_chw
 
 # Set some parameters
 im_width = 128
 im_height = 128
 im_chan = 3
+debug = True
 
 def train(net,
           dataset_file,
           out_dir,
+          device,
           epochs=5,
           lr=0.1,
           val_ratio=0.05,
+          val_every=5,
           save_every=5000,
           gamma=0.666,
           steplr=1e6):
@@ -38,8 +42,10 @@ def train(net,
         net: The network to be trained
         dataset_file: The dataset file to get input data from
         out_dir: The output directory to store execution results
+        device: The Torch device to execute Tensors on
         epochs: The number of training epochs
         val_ratio: The ratio of training data to be used for validation
+        val_every: Indicates number of epochs between validation
         save_every: The number of epoch to execute per results saving
         gamma: The annealing factor of learning rate decay for Adam
         steplr: How often should we change the learning rate
@@ -48,15 +54,27 @@ def train(net,
     print('Getting train images and masks from dataset ')
     sys.stdout.flush()
     with h5py.File(dataset_file, 'r') as f:
-        X_train = f['train/images'][()]
-        Y_train = f['train/masks'][()]
+        X = f['train/images'][()]
+        y = f['train/masks'][()]
 
     print('Done!')
+
+    # Split dataset into validation and train data
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=val_ratio, random_state=42)
+
+    print("Train samples count: %d, validation: %d" % (X_train.shape[0], X_val.shape[0]))
 
     #
     # Check if training data looks all right
     #
-    plot_train_check(X_train, Y_train)
+    #if debug:
+    #    plot_train_check(X_train, y_train)
+
+    # transpose HWC to CHW image data format accepted by Torch
+    X_train = list(map(hwc_to_chw, X_train))
+    X_val = list(map(hwc_to_chw, X_val))
+    y_train = list(map(hwc_to_chw, y_train))
+    y_val = list(map(hwc_to_chw, y_val))
 
     #
     # Initialize optimizer
@@ -64,6 +82,47 @@ def train(net,
     print("Initializing optimizer")
     optimizer = torch.optim.Adam(net.parameters(), lr=1.0*lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, gamma=gamma, step_size=steplr)
+
+    criterion = nn.BCELoss()
+
+    for epoch in range(epochs):
+        if debug:
+            print('Starting epoch %d/%d.' % (epoch + 1, epochs))
+
+        # Initialize Hebbian with zero values for new epoch
+        hebb = net.initialZeroHebb()
+
+        epoch_loss = 0
+
+        net.train()
+        # Enumerate over samples and do train
+        for img, mask in zip(X_train, y_train):
+            t_img = torch.from_numpy(np.array([img.astype(np.float32)])).to(device)
+            y_target = torch.from_numpy(mask.astype(np.float32)).to(device)
+
+            # Starting each sample, we detach the Hebbian state from how it was previously produced.
+            # If we didn't, the model would try backpropagating all the way to start of the dataset.
+            y_pred, hebb = net(t_img, Variable(hebb))
+
+            y_pred_flat = y_pred.view(-1)
+            y_target_flat = y_target.view(-1)
+
+            # compute loss
+            loss = criterion(y_pred_flat, Variable(y_target_flat, requires_grad=False))
+            epoch_loss += loss.item()
+
+            print("Loss: %s, epoch loss: %f" % (loss.item(), epoch_loss))
+
+            # Compute the gradients
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+
+        if debug:
+            print('Epoch finished ! Loss: {}'.format(epoch_loss / len(X_train)))
+
+
 
 def parse_args():
     """
@@ -111,6 +170,7 @@ if __name__ == '__main__':
         train(net=net,
               dataset_file=args.data_file,
               out_dir=args.out_dir,
+              device=args.device,
               epochs=args.epochs,
               lr=args.lr,
               save_every=args.save_every)
