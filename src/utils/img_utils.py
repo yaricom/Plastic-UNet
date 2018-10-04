@@ -82,6 +82,9 @@ def create_hdf5_data_set(data_dir,
 
     print('Done!')
 
+def hwc_to_chw(img):
+    return np.transpose(img, axes=[2, 0, 1])
+
 def plot_train_check(X_train, Y_train):
     ix = random.randint(0, len(X_train) - 1)
     fig = plt.figure()
