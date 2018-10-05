@@ -102,6 +102,16 @@ def plot_test_ckeck(X_test):
     plt.imshow(X_test[ix])
     plt.show()
 
+def plot_image_mask(image, mask):
+    fig = plt.figure()
+    a = fig.add_subplot(1, 2, 1)
+    imgplot = plt.imshow(image)
+    a.set_title('Image')
+    a = fig.add_subplot(1, 2, 2)
+    plt.imshow(mask)
+    a.set_title('Mask')
+    plt.show()
+
 def parse_args():
     """
     Parses command line arguments
