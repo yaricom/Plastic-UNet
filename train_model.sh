@@ -11,4 +11,5 @@ help () {
     echo
 }
 
-/usr/bin/env python3 src/train.py --epochs 5 --save_every 5 --data ./data/dataset.hdf5 --out ./out
+/usr/bin/env python3 src/train.py --epochs 5 --save_every 1 --validate_every 1 \
+                                  --data ./data1/dataset.hdf5 --out ./out
