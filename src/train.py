@@ -2,6 +2,7 @@
 
 import sys
 import os
+import pickle
 
 import warnings
 from optparse import OptionParser
@@ -33,8 +34,8 @@ def train(net,
           epochs=5,
           lr=0.1,
           val_ratio=0.05,
-          val_every=2,
-          save_every=5000,
+          val_every=50,
+          save_every=100,
           gamma=0.666,
           steplr=1e6):
     """
@@ -51,6 +52,18 @@ def train(net,
         gamma: The annealing factor of learning rate decay for Adam
         steplr: How often should we change the learning rate
     """
+    # Put parameters into dictionary
+    params = {"dataset_file":dataset_file,
+              "out_dir":out_dir,
+              "device":device.type,
+              "epochs":epochs,
+              "lr":lr,
+              "val_ratio":val_ratio,
+              "val_every":val_every,
+              "save_every":save_every,
+              "gamma":gamma,
+              "steplr":steplr}
+
     # Get train images and masks
     print('Getting train images and masks from dataset ')
     sys.stdout.flush()
@@ -89,6 +102,8 @@ def train(net,
     val_accuracies = []
 
     samples_count = len(X_train)
+    loss_between_saves = 0.0
+    last_save_epoch = 0
 
     #
     # Initialize optimizer
@@ -136,26 +151,75 @@ def train(net,
 
 
         epoch_loss = np.mean(all_losses[-samples_count])
+        loss_between_saves += epoch_loss
         if debug:
-            print('Epoch finished ! Loss: {}'.format(epoch_loss))
+            print('Epoch finished! Loss: %f' % (epoch_loss))
 
         #
         # Perform validation
         #
         if (epoch + 1) % val_every == 0:
             val_acc, val_loss = eval_net(net, X_val, y_val, device, nn.BCELoss())
-            print('Validation accuracy: %f, loss: %f' % (val_acc, val_loss))
 
             # store loss values
             val_train_losses.append(epoch_loss)
             val_test_losses.append(val_loss)
             val_accuracies.append(val_acc)
 
+            if debug:
+                print('Validation accuracy: %f, loss: %f' % (val_acc, val_loss))
+                print ("Eta:", net.eta.data.cpu().numpy())
+                sys.stdout.flush()
+
 
         #
         # Save checkpoint if appropriate
         #
-        #if epoch + 1 % save_every == 0:
+        if (epoch + 1) % save_every == 0 or (epoch + 1) == epochs:
+            print("Saving checkpoint files for epoch:", epoch)
+
+            epochs_since_last_cp = epoch - last_save_epoch # epoch starts from zero
+            last_save_epoch = epoch
+
+            if epochs_since_last_cp == 0:
+                epochs_since_last_cp = 1
+            print("Average loss over the last %d epochs: %f" % \
+                    (epochs_since_last_cp, loss_between_saves/epochs_since_last_cp))
+            if epoch > 100:
+                loss_last_100 = np.mean(all_losses[-samples_count * 100])
+                print("Average loss over the last 100 epochs: ", losslast100)
+
+            loss_between_saves = 0.0
+            # Save trained data, network parameters and losses
+            local_preffix = out_dir + '/train_data'
+            if (epoch + 1) % 50000 == 0:
+                local_preffix = local_preffix + "_"+str(epoch + 1)
+            with h5py.File(local_preffix + ".hdf5", 'w') as f:
+                f.create_dataset("net/w", data=net.w.data.cpu().numpy(),
+                                 compression="gzip", shuffle=True, fletcher32=True)
+                f.create_dataset("net/alpha", data=net.alpha.data.cpu().numpy(),
+                                 compression="gzip", shuffle=True, fletcher32=True)
+                f.create_dataset("net/eta", data=net.eta.data.cpu().numpy(),
+                                 compression="gzip", shuffle=True, fletcher32=True)
+
+                f.create_dataset("train/all_losses", data=all_losses,
+                                 compression="gzip", shuffle=True, fletcher32=True)
+
+                f.create_dataset("validation/train_losses", data=val_train_losses,
+                                 compression="gzip", shuffle=True, fletcher32=True)
+                f.create_dataset("validation/test_losses", data=val_test_losses,
+                                 compression="gzip", shuffle=True, fletcher32=True)
+                f.create_dataset("validation/accuracies", data=val_accuracies,
+                                 compression="gzip", shuffle=True, fletcher32=True)
+
+                f.flush()
+
+            # Save training paprameters
+            with open(local_preffix+'_parameters.dat', 'wb') as fo:
+                pickle.dump(params, fo)
+
+            # Save network state dictionary
+            torch.save(net.state_dict(), local_preffix + "_net.pth")
 
 
 def parse_args():
@@ -171,8 +235,10 @@ def parse_args():
                       default=False, help='use cuda')
     parser.add_option('-c', '--load', dest='load',
                       default=False, help='load file model')
-    parser.add_option('--save_every', dest='save_every', default=5, type='int',
+    parser.add_option('--save_every', dest='save_every', default=100, type='int',
                       help='save results per specified number of epochs')
+    parser.add_option('--validate_every', dest='validate_every', default=50, type='int',
+                      help='validate model per specified number of epochs')
     parser.add_option('-i', '--data', dest='data_file', type='string',
                       help='the path to the dataset file with input data')
     parser.add_option('-o', '--out', dest='out_dir', type='string',
@@ -185,6 +251,10 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
+
+    # Check if output directory exists
+    if not os.path.isdir(args.out_dir):
+        os.mkdir(args.out_dir)
 
     # Create torch device for tensor operations
     args.device = None
@@ -207,9 +277,10 @@ if __name__ == '__main__':
               device=args.device,
               epochs=args.epochs,
               lr=args.lr,
-              save_every=args.save_every)
+              save_every=args.save_every,
+              val_every=args.validate_every)
     except KeyboardInterrupt:
-        torch.save(net.state_dict(), 'INTERRUPTED.pth')
+        torch.save(net.state_dict(), args.out_dir + '/INTERRUPTED.pth')
         print('Saved interrupt')
         try:
             sys.exit(0)
