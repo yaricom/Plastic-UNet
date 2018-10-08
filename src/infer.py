@@ -45,11 +45,11 @@ def inference(net,
     mask = y_pred.squeeze().cpu().numpy()
     return mask
 
-def predict(data_dir,
+def predict(net,
+            data_dir,
             out_dir,
-            model,
+            test_ids,
             subm_file="submission.csv",
-            gpu=True,
             mask_threshold=0.5,
             visualize=False,
             save_masks=False,
@@ -62,11 +62,11 @@ def predict(data_dir,
     """
     Iterate over all test images and do masks prediction
     Arguments:
+        net:            The trained network model for inference
         data_dir:       The directory to look for test data
         out_dir:        The directory to save results
-        model:          The trained network model and state dictionary
+        test_ids:       The array with IDs of test images to use
         subm_file:      The file name of submission file
-        gpu:            The flag to indicate whether to use GPU for inference
         mask_threshold: The minimum probability value to consider a mask pixel white
         visualize:      The flag to indicate whether to visualize the images as they are processed
         save_masks:     The flag to indicate whether to save the output masks
@@ -77,26 +77,8 @@ def predict(data_dir,
         img_chan:       The number of channels in input plot_image
         debug:          The flag to indicate whether to show debug information
     """
-    # Check if output directory exists
-    if not os.path.isdir(out_dir):
-        os.mkdir(out_dir)
-
-    # Create torch device for tensor operations
-    device = None
-    if gpu and torch.cuda.is_available():
-        device = torch.device('cuda')
-    else:
-        device = torch.device('cpu')
-
-    net = UNetp(n_channels=img_chan, n_classes=1, device=device)
-
-    print("Loading model %s" % (model))
-    net.load_state_dict(torch.load(model))
-    net.to(device)
-
     # Get test images
     print('Getting and resizing test images... ')
-    test_ids = next(os.walk(data_dir + "/test/images"))[2]
     X_test = np.zeros((len(test_ids), img_height, img_width, img_chan), dtype=np.float64)
     for n, id_ in enumerate(test_ids):
         x = load_image(data_dir + '/test/images/' + id_, (img_height, img_width, img_chan))
@@ -107,8 +89,8 @@ def predict(data_dir,
     #
     # Check if test data looks all right
     #
-    if debug:
-        plot_test_check(X_test)
+    #if debug:
+    #    plot_test_check(X_test)
 
     # transpose HWC to CHW image data format accepted by Torch
     X_test = list(map(hwc_to_chw, X_test))
@@ -118,13 +100,10 @@ def predict(data_dir,
     for i, img_data in enumerate(X_test):
         mask = inference(net=net,
                          img_data=img_data,
-                         device=device)
+                         device=net.torch_dev)
 
         mask = resize(mask, (out_img_height, out_img_width), mode='constant', preserve_range=True)
         preds_downsampled.append(mask)
-
-        print(mask)
-
 
         if visualize:
             image = resize(img_data, (img_chan, out_img_height, out_img_width), mode='constant')
@@ -152,6 +131,54 @@ def predict(data_dir,
     sub.index.names = ['id']
     sub.columns = ['rle_mask']
     sub.to_csv(out_dir + "/" + subm_file)
+
+def start_inference(model,
+                    data_dir,
+                    out_dir,
+                    gpu=True,
+                    mask_threshold=0.5,
+                    visualize=False,
+                    save_masks=False,
+                    img_chan=3,
+                    debug=False):
+    """
+    Starts inference by loading trained network model
+    Arguments:
+        model:          The trained network model and state dictionary
+        data_dir:       The directory to look for test data
+        out_dir:        The directory to save results
+        subm_file:      The file name of submission file
+        gpu:            The flag to indicate whether to use GPU for inference
+        mask_threshold: The minimum probability value to consider a mask pixel white
+        visualize:      The flag to indicate whether to visualize the images as they are processed
+        save_masks:     The flag to indicate whether to save the output masks
+        debug:          The flag to indicate whether to show debug information
+    """
+    # Create torch device for tensor operations
+    device = None
+    if gpu and torch.cuda.is_available():
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
+
+    net = UNetp(n_channels=img_chan, n_classes=1, device=device)
+
+    print("Loading model %s" % (model))
+    net.load_state_dict(torch.load(model))
+    net.to(device)
+
+    test_ids = next(os.walk(data_dir + "/test/images"))[2]
+    print("Test images count: %d" % len(test_ids))
+
+    predict(net=net,
+            data_dir=data_dir,
+            out_dir=out_dir,
+            test_ids=test_ids,
+            mask_threshold=mask_threshold,
+            visualize=visualize,
+            save_masks=save_masks,
+            img_chan=img_chan,
+            debug=debug)
 
 def get_args():
     """
@@ -185,11 +212,16 @@ def get_args():
 
 if __name__ == "__main__":
     args = get_args()
-    predict(model=args.model,
-            data_dir=args.data_dir,
-            out_dir=args.out_dir,
-            gpu=args.gpu,
-            mask_threshold=args.mask_threshold,
-            visualize=args.visualize,
-            save_masks=args.save,
-            debug=True)
+
+    # Check if output directory exists
+    if not os.path.isdir(args.out_dir):
+        os.mkdir(args.out_dir)
+
+    start_inference(model=args.model,
+                    data_dir=args.data_dir,
+                    out_dir=args.out_dir,
+                    gpu=args.gpu,
+                    mask_threshold=args.mask_threshold,
+                    visualize=args.visualize,
+                    save_masks=args.save,
+                    debug=True)
