@@ -224,6 +224,8 @@ def start_train(samples,
         save_every:     The number of epoch to execute per results saving
         gamma:          The annealing factor of learning rate decay for Adam
         steplr:         How often should we change the learning rate
+    Returns:
+        The trained network
     """
     # Create torch device for tensor operations
     device = None
@@ -267,6 +269,8 @@ def start_train(samples,
             sys.exit(0)
         except SystemExit:
             os._exit(0)
+
+    return net
 
 def load_train_dataset( data_dir,
                         img_width,
