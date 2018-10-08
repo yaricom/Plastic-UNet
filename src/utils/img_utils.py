@@ -44,9 +44,9 @@ def create_hdf5_data_set(data_dir,
     Y_train = np.zeros((len(train_ids), im_height, im_width, 1), dtype=np.bool)
     for n, id_ in enumerate(train_ids):
         path = data_dir
-        x = load_image(path + '/train/images/' + id_, (im_width, im_height, im_chan))
+        x = load_image(path + '/train/images/' + id_, (im_height, im_width, im_chan))
         X_train[n] = x
-        mask = load_image(path + '/train/masks/' + id_, (im_width, im_height, 1))
+        mask = load_image(path + '/train/masks/' + id_, (im_height, im_width, 1))
         Y_train[n] = mask
 
     print('Done!')
@@ -56,27 +56,11 @@ def create_hdf5_data_set(data_dir,
     #
     plot_train_check(X_train, Y_train)
 
-    print('Getting and resizing test images... ')
-    test_ids = next(os.walk(data_dir + "/test/images"))[2]
-    X_test = np.zeros((len(test_ids), im_height, im_width, im_chan), dtype=np.float64)
-    for n, id_ in enumerate(test_ids):
-        x = load_image(data_dir + '/test/images/' + id_, (im_width, im_height, im_chan))
-        X_test[n] = x
-
-    print('Done!')
-
-    #
-    # Check if test data looks all right
-    #
-    plot_test_ckeck(X_test)
-
     out_path = data_dir + "/" + out_file
     print('Creation of HDF5 dataset file at: %s' % out_path)
     with h5py.File(out_path,'w') as f:
         f.create_dataset("train/images", data=X_train, compression="gzip", shuffle=True, fletcher32=True)
         f.create_dataset("train/masks", data=Y_train, compression="gzip", shuffle=True, fletcher32=True)
-
-        f.create_dataset("test/images", data=X_test, compression="gzip", shuffle=True, fletcher32=True)
 
         f.flush()
 
@@ -97,7 +81,7 @@ def plot_train_check(X_train, Y_train):
     a.set_title('Mask')
     plt.show()
 
-def plot_test_ckeck(X_test):
+def plot_test_check(X_test):
     ix = random.randint(0, len(X_test) - 1)
     plt.imshow(X_test[ix])
     plt.show()
@@ -108,7 +92,8 @@ def plot_image_mask(image, mask):
     imgplot = plt.imshow(image)
     a.set_title('Image')
     a = fig.add_subplot(1, 2, 2)
-    plt.imshow(mask)
+    tmp = np.squeeze(mask).astype(np.float32)
+    plt.imshow(np.dstack((tmp,tmp,tmp)))
     a.set_title('Mask')
     plt.show()
 
