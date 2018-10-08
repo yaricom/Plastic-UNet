@@ -18,6 +18,7 @@ class UNetp(nn.Module):
             nbf: The number of features in plasticity rule vector (width * height)
         """
         super(UNetp, self).__init__()
+
         self.n_classes = n_classes
         self.n_channels = n_channels
         self.nbf = nbf # the number of features to be used for plastic rule learning
@@ -43,6 +44,9 @@ class UNetp(nn.Module):
         self.up3 = up(256, 64)
         self.up4 = up(128, 64)
         self.outc = outconv(64, n_classes)
+
+         # Move network parameters to the specified device
+        self.to(device)
 
     def forward(self, x, hebb):
         if x.shape[0] != 1:
