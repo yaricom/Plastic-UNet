@@ -17,8 +17,11 @@ from torch.autograd import Variable
 from torch import optim
 
 from unet import UNetp
+
 from utils import plot_train_check
 from utils import hwc_to_chw
+from utils import load_image
+
 from eval import eval_net
 
 def train(net, X, y,
@@ -102,8 +105,6 @@ def train(net, X, y,
             loss_num = loss.item()
             all_losses.append(loss_num)
 
-            print(loss_num)
-
             # Compute the gradients
             loss.backward()
             optimizer.step()
@@ -119,7 +120,12 @@ def train(net, X, y,
         # Perform validation
         #
         if (epoch + 1) % params['val_every'] == 0:
-            val_acc, val_loss = eval_net(net, X_val, y_val, params['device'], nn.BCELoss())
+            val_acc, val_loss = eval_net(net,
+                                         X_val=X_val,
+                                         y_val=y_val,
+                                         device=params['device'],
+                                         criterion=nn.BCELoss(),
+                                         debug=params['debug'])
 
             # store loss values
             val_train_losses.append(epoch_loss)
@@ -135,26 +141,31 @@ def train(net, X, y,
         #
         # Save checkpoint if appropriate
         #
-        if (epoch + 1) % params['save_every'] == 0 or (epoch + 1) == epochs:
-            print("Saving checkpoint files for epoch:", epoch)
+        if (epoch + 1) % params['save_every'] == 0 or (epoch + 1) == params['epochs']:
+            if params['debug']:
+                print("Saving checkpoint files for epoch:", epoch)
 
             epochs_since_last_cp = epoch - last_save_epoch # epoch starts from zero
             last_save_epoch = epoch
 
             if epochs_since_last_cp == 0:
                 epochs_since_last_cp = 1
-            print("Average loss over the last %d epochs: %f" % \
+
+            if params['debug']:
+                print("Average loss over the last %d epochs: %f" % \
                     (epochs_since_last_cp, loss_between_saves/epochs_since_last_cp))
+
             if epoch > 100:
                 loss_last_100 = np.mean(all_losses[-samples_count * 100])
-                print("Average loss over the last 100 epochs: ", losslast100)
+                if params['debug']:
+                    print("Average loss over the last 100 epochs: ", losslast100)
 
             loss_between_saves = 0.0
             # Save trained data, network parameters and losses
-            local_preffix = params['out_dir'] + '/train_data'
+            local_preffix = params['out_dir'] + '/train'
             if (epoch + 1) % 50000 == 0:
                 local_preffix = local_preffix + "_"+str(epoch + 1)
-            with h5py.File(local_preffix + ".hdf5", 'w') as f:
+            with h5py.File(local_preffix + "_data.hdf5", 'w') as f:
                 f.create_dataset("net/w", data=net.w.data.cpu().numpy(),
                                  compression="gzip", shuffle=True, fletcher32=True)
                 f.create_dataset("net/alpha", data=net.alpha.data.cpu().numpy(),
@@ -185,15 +196,19 @@ def start_train(samples,
                 target,
                 out_dir,
                 model,
+                img_width,
+                img_height,
+                img_chan,
                 load=False,
                 gpu=True,
                 epochs=5,
-                lr=0.1,
+                lr=3e-5,
                 val_ratio=0.05,
                 val_every=50,
                 save_every=100,
                 gamma=0.666,
-                steplr=1e6):
+                steplr=1e6,
+                debug=False):
     """
     Starts network training
     Arguments:
@@ -227,10 +242,10 @@ def start_train(samples,
               "save_every":save_every,
               "gamma":gamma,
               "steplr":steplr,
-              "im_width":128,
-              "im_height":128,
-              "im_chan":3,
-              "debug":True}
+              "im_width":img_width,
+              "im_height":img_height,
+              "im_chan":img_chan,
+              "debug":debug}
 
     # Create network structure
     net = UNetp(n_channels=params['im_chan'], n_classes=1, device=device)
@@ -253,6 +268,28 @@ def start_train(samples,
         except SystemExit:
             os._exit(0)
 
+def load_train_dataset( data_dir,
+                        img_width,
+                        img_height,
+                        img_chan):
+    """
+    Loads train data set from provided directory.
+    Arguments:
+        data_dir: The data directory to load training data
+    Returns:
+        The preprocessed dataset with data samples and target labels
+    """
+    train_ids = next(os.walk(data_dir + "/train/images"))[2]
+    X_train = np.zeros((len(train_ids), img_height, img_width, img_chan), dtype=np.float64)
+    Y_train = np.zeros((len(train_ids), img_height, img_width, 1), dtype=np.bool)
+    for n, id_ in enumerate(train_ids):
+        x = load_image(data_dir + '/train/images/' + id_, (img_height, img_width, img_chan))
+        X_train[n] = x
+        mask = load_image(data_dir + '/train/masks/' + id_, (img_height, img_width, 1))
+        Y_train[n] = mask
+
+    return X_train, Y_train
+
 def parse_args():
     """
     Parses command line arguments
@@ -262,6 +299,8 @@ def parse_args():
                       help='number of epochs')
     parser.add_option('-l', '--learning-rate', dest='lr', default=3e-5,
                       type='float', help='learning rate')
+    parser.add_option('-s', '--step-lr', dest='steplr', default=1e6,
+                      type='float', help='the learning rate annealing step')
     parser.add_option('-g', '--gpu', action='store_true', dest='gpu',
                       default=False, help='use cuda')
 
@@ -276,7 +315,9 @@ def parse_args():
     parser.add_option('--validate_every', dest='validate_every', default=50, type='int',
                       help='validate model per specified number of epochs')
 
-    parser.add_option('-i', '--data', dest='data_file', type='string',
+    parser.add_option('-d', '--data', dest='data_dir', type='string',
+                      help='the directory with input data')
+    parser.add_option('-i', '--dataset', dest='dataset_file', type='string',
                       help='the path to the dataset file with input data')
     parser.add_option('-o', '--out', dest='out_dir', type='string',
                       help='the path to the directory for results ouput')
@@ -291,14 +332,28 @@ if __name__ == '__main__':
     if not os.path.isdir(args.out_dir):
         os.mkdir(args.out_dir)
 
-    # Get train images and masks
-    print('Getting train images and masks from dataset ')
-    sys.stdout.flush()
-    with h5py.File(args.data_file, 'r') as f:
-        X = f['train/images'][()]
-        y = f['train/masks'][()]
+    print(args)
 
-    print('Done!')
+    # Get train images and masks
+    if args.dataset_file != None:
+        print('Getting train images and masks from dataset file %s' % args.dataset_file)
+        sys.stdout.flush()
+        with h5py.File(args.dataset_file, 'r') as f:
+            X = f['train/images'][()]
+            y = f['train/masks'][()]
+
+        print('Done!')
+    elif args.data_dir != None:
+        print('Getting train images and masks from data directory %s' % args.data_dir)
+        sys.stdout.flush()
+        X, y = load_train_dataset(data_dir=args.data_dir,
+                                  img_width=128,
+                                  img_height=128,
+                                  img_chan=3)
+
+        print('Done!')
+    else:
+        raise ValueError("The input data directory or dataset file not specified")
 
     # start network training
     start_train(samples=X,
@@ -309,5 +364,10 @@ if __name__ == '__main__':
                 gpu=args.gpu,
                 epochs=args.epochs,
                 lr=args.lr,
+                steplr=args.steplr,
                 save_every=args.save_every,
-                val_every=args.validate_every)
+                val_every=args.validate_every,
+                img_width=128,
+                img_height=128,
+                img_chan=3,
+                debug=True)

@@ -9,15 +9,16 @@ import numpy as np
 from utils import iou_metric
 
 
-def eval_net(net, X_val, y_val, device, criterion):
+def eval_net(net, X_val, y_val, device, criterion, debug=False):
     """
     Perorms network evaluation
     Arguments:
-        net: The network to be evaluated
-        X_val: The data samples for validation
-        y_val: The ground truth data for validation
-        device: The Torch device to use
-        criterion: The loss function to use
+        net:        The network to be evaluated
+        X_val:      The data samples for validation
+        y_val:      The ground truth data for validation
+        device:     The Torch device to use
+        criterion:  The loss function to use
+        debug:      The flag to indicate if debug info should be displayed
     Returns:
         (accuracy, loss) the tuple with validation accuracy against IoU metric as well as validation loss
     """
@@ -42,7 +43,7 @@ def eval_net(net, X_val, y_val, device, criterion):
             val_loss += loss.item()
 
             # The validation accuracy
-            acc = iou_metric(y_pred_in=y_pred_flat.detach().numpy(), y_true_in=y_target_flat.detach().numpy(), print_table=True)
+            acc = iou_metric(y_pred_in=y_pred_flat.cpu().numpy(), y_true_in=y_target_flat.cpu().numpy(), print_table=debug)
             total_acc += acc
 
     return (total_acc / (i + 1), val_loss / (i + 1))
