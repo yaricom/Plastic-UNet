@@ -21,24 +21,16 @@ from utils import plot_train_check
 from utils import hwc_to_chw
 from eval import eval_net
 
-def train(net,
+def train(net, X, y,
           params):
     """
     Do network training
     Arguments:
         net:    The network to be trained
+        X:      The training data samples
+        y:      The training data labels
         params: The hyper parameters to use
     """
-
-
-    # Get train images and masks
-    print('Getting train images and masks from dataset ')
-    sys.stdout.flush()
-    with h5py.File(params['dataset_file'], 'r') as f:
-        X = f['train/images'][()]
-        y = f['train/masks'][()]
-
-    print('Done!')
 
     # Split dataset into validation and train data
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=params['val_ratio'], random_state=42)
@@ -189,7 +181,8 @@ def train(net,
             # Save network state dictionary
             torch.save(net.state_dict(), local_preffix + "_net.pth")
 
-def start_train(dataset_file,
+def start_train(samples,
+                target,
                 out_dir,
                 model,
                 load=False,
@@ -204,7 +197,8 @@ def start_train(dataset_file,
     """
     Starts network training
     Arguments:
-        dataset_file:   The dataset file to get input data from
+        samples:        The training samples
+        target:         The training target labels
         out_dir:        The output directory to store execution results
         model:          The file with network model if needed to load network state before training
         load:           The flag to indicate whether to load network state before
@@ -224,8 +218,7 @@ def start_train(dataset_file,
         device = torch.device('cpu')
 
     # Put parameters into dictionary
-    params = {"dataset_file":dataset_file,
-              "out_dir":out_dir,
+    params = {"out_dir":out_dir,
               "device":device,
               "epochs":epochs,
               "lr":lr,
@@ -248,7 +241,10 @@ def start_train(dataset_file,
 
     # do network training
     try:
-        train(net, params)
+        train(net=net,
+              X=samples,
+              y=target,
+              params=params)
     except KeyboardInterrupt:
         torch.save(net.state_dict(), args.out_dir + '/INTERRUPTED.pth')
         print('Saved interrupt')
@@ -295,8 +291,18 @@ if __name__ == '__main__':
     if not os.path.isdir(args.out_dir):
         os.mkdir(args.out_dir)
 
+    # Get train images and masks
+    print('Getting train images and masks from dataset ')
+    sys.stdout.flush()
+    with h5py.File(args.data_file, 'r') as f:
+        X = f['train/images'][()]
+        y = f['train/masks'][()]
+
+    print('Done!')
+
     # start network training
-    start_train(dataset_file=args.data_file,
+    start_train(samples=X,
+                target=y,
                 out_dir=args.out_dir,
                 model=args.model,
                 load=args.load,
