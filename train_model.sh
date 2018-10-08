@@ -12,4 +12,6 @@ help () {
 }
 
 /usr/bin/env python3 src/train.py --epochs 5 --save_every 1 --validate_every 1 \
-                                  --data ./data1/dataset.hdf5 --out ./out
+                                  --learning-rate 3e-5 --step-lr 1e6 \
+                                  --data ./data1 --out ./out \
+#                                  --dataset ./data/dataset.hdf5 --out ./out
