@@ -3,6 +3,7 @@
 import sys
 import os
 import pickle
+import time
 
 import warnings
 from optparse import OptionParser
@@ -77,11 +78,18 @@ def train(net, X, y,
 
     criterion = nn.BCELoss()
 
+    if params['stop_time'] > 0:
+        print("Training started at: %d sec and set to stop at: %d sec" %
+                (time.time(), params['stop_time']))
+
     for epoch in range(params['epochs']):
         if params['debug']:
             print('Starting epoch %d/%d.' % (epoch + 1, params['epochs']))
 
         net.train()
+
+        # Store epoch start time
+        epoch_start_time = time.time()
 
         # Initialize Hebbian with zero values for new epoch
         hebb = net.initialZeroHebb()
@@ -113,8 +121,15 @@ def train(net, X, y,
 
         epoch_loss = np.mean(all_losses[-samples_count])
         loss_between_saves += epoch_loss
+
+        epoch_time = time.time() - epoch_start_time
+        next_epoch_finish_time = epoch_time + time.time()
+        # check if need to force stop training due to time limits
+        terminate_training = (params['stop_time'] > 0 and next_epoch_finish_time >= params['stop_time'])
+
         if params['debug']:
-            print('Epoch finished! Loss: %f' % (epoch_loss))
+            print('Epoch finished! Loss: %f, time spent: %d, terminate due to time limits: %s' %
+                    (epoch_loss, epoch_time, terminate_training))
 
         #
         # Perform validation
@@ -141,7 +156,7 @@ def train(net, X, y,
         #
         # Save checkpoint if appropriate
         #
-        if (epoch + 1) % params['save_every'] == 0 or (epoch + 1) == params['epochs']:
+        if (epoch + 1) % params['save_every'] == 0 or (epoch + 1) == params['epochs'] or terminate_training:
             if params['debug']:
                 print("Saving checkpoint files for epoch:", epoch)
 
@@ -192,6 +207,14 @@ def train(net, X, y,
             # Save network state dictionary
             torch.save(net.state_dict(), local_preffix + "_net.pth")
 
+        # Terminate training loop due to time limits
+        if terminate_training:
+            print("Training terminated due to the time limits!")
+            print("Current epoch loss: %s" % (epoch_loss))
+            print("Stop time limit: %d, estimated time of next epoch end: %d" %
+                    (params['stop_time'], next_epoch_finish_time))
+            break
+
 def start_train(samples,
                 target,
                 out_dir,
@@ -199,6 +222,7 @@ def start_train(samples,
                 img_width,
                 img_height,
                 img_chan,
+                max_train_time=-1,
                 load=False,
                 gpu=True,
                 epochs=5,
@@ -217,6 +241,7 @@ def start_train(samples,
         out_dir:        The output directory to store execution results
         model:          The file with network model if needed to load network state before training
         load:           The flag to indicate whether to load network state before
+        max_train_time: The maximal time in seconds to spend on training
         gpu:            The flag to indicate whether to use GPU
         epochs:         The number of training epochs
         val_ratio:      The ratio of training data to be used for validation
@@ -234,10 +259,15 @@ def start_train(samples,
     else:
         device = torch.device('cpu')
 
+    if max_train_time > 0:
+        stop_time = time.time() + max_train_time
+    else:
+        stop_time = -1
     # Put parameters into dictionary
     params = {"out_dir":out_dir,
               "device":device,
               "epochs":epochs,
+              "stop_time":stop_time,
               "lr":lr,
               "val_ratio":val_ratio,
               "val_every":val_every,
@@ -313,9 +343,10 @@ def parse_args():
     parser.add_option('--model', '-m', default='MODEL.pth',
                         help="Specify the file in which is stored the model")
 
+    parser.add_option('--max-train-time', dest='max_train_time', default=-1, type='int',
+                      help='used to specify max training time limit in seconds [default: -1 which means no limits]')
     parser.add_option('--save_every', dest='save_every', default=100, type='int',
                       help='save results per specified number of epochs')
-
     parser.add_option('--validate_every', dest='validate_every', default=50, type='int',
                       help='validate model per specified number of epochs')
 
@@ -369,6 +400,7 @@ if __name__ == '__main__':
                 epochs=args.epochs,
                 lr=args.lr,
                 steplr=args.steplr,
+                max_train_time=args.max_train_time,
                 save_every=args.save_every,
                 val_every=args.validate_every,
                 img_width=128,
