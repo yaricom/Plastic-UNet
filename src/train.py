@@ -40,6 +40,7 @@ def train(net, X, y,
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=params['val_ratio'], random_state=42)
 
     print("Train samples count: %d, validation: %d" % (X_train.shape[0], X_val.shape[0]))
+    print(params)
 
     #
     # Check if training data looks all right
@@ -357,6 +358,9 @@ def parse_args():
     parser.add_option('-o', '--out', dest='out_dir', type='string',
                       help='the path to the directory for results ouput')
 
+    parser.add_option('-v', '--debug', action='store_true', dest='debug',
+                      default=False, help='show debug information')
+
     (options, args) = parser.parse_args()
     return options
 
@@ -406,4 +410,4 @@ if __name__ == '__main__':
                 img_width=128,
                 img_height=128,
                 img_chan=3,
-                debug=True)
+                debug=args.debug)
