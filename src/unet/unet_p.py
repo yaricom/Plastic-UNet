@@ -48,6 +48,9 @@ class UNetp(nn.Module):
          # Move network parameters to the specified device
         self.to(device)
 
+        # output info
+        print("UNet plastic model with plastic rule [%s] initialized" % self.rule)
+
     def forward(self, x, hebb):
         if x.shape[0] != 1:
             raise ValueError("Only batch size: 1 is supported, but was: %d" % x.shape[0])
