@@ -179,8 +179,9 @@ def train(net, X, y,
             loss_between_saves = 0.0
             # Save trained data, network parameters and losses
             local_preffix = params['out_dir'] + '/train'
-            if (epoch + 1) % 50000 == 0:
+            if (epoch + 1) % params['rollout'] == 0 and not terminate_training:
                 local_preffix = local_preffix + "_"+str(epoch + 1)
+
             with h5py.File(local_preffix + "_data.hdf5", 'w') as f:
                 f.create_dataset("net/w", data=net.w.data.cpu().numpy(),
                                  compression="gzip", shuffle=True, fletcher32=True)
@@ -211,7 +212,7 @@ def train(net, X, y,
         # Terminate training loop due to time limits
         if terminate_training:
             print("Training terminated due to the time limits!")
-            print("Current epoch loss: %s" % (epoch_loss))
+            print("Current epoch %d, train loss: %s" % (epoch, epoch_loss))
             print("Stop time limit: %d, estimated time of next epoch end: %d" %
                     (params['stop_time'], next_epoch_finish_time))
             break
@@ -233,6 +234,8 @@ def start_train(samples,
                 save_every=100,
                 gamma=0.666,
                 steplr=1e6,
+                rollout=50000,
+                prule="hebb",
                 debug=False):
     """
     Starts network training
@@ -250,6 +253,8 @@ def start_train(samples,
         save_every:     The number of epoch to execute per results saving
         gamma:          The annealing factor of learning rate decay for Adam
         steplr:         How often should we change the learning rate
+        rollout:        The number of epochs to pass before file names rollout
+        prule:          The plastic rule to use when training
     Returns:
         The trained network
     """
@@ -273,15 +278,17 @@ def start_train(samples,
               "val_ratio":val_ratio,
               "val_every":val_every,
               "save_every":save_every,
+              "rollout":rollout,
               "gamma":gamma,
               "steplr":steplr,
+              "prule":prule,
               "im_width":img_width,
               "im_height":img_height,
               "im_chan":img_chan,
               "debug":debug}
 
     # Create network structure
-    net = UNetp(n_channels=params['im_chan'], n_classes=1, device=device)
+    net = UNetp(n_channels=params['im_chan'], n_classes=1, device=device, rule=prule)
 
     if load:
         net.load_state_dict(torch.load(model))
@@ -339,6 +346,9 @@ def parse_args():
     parser.add_option('-g', '--gpu', action='store_true', dest='gpu',
                       default=False, help='use cuda')
 
+    parser.add_option('--prule', '-p', default='hebb',
+                        help="the plastic rule to use when training")
+
     parser.add_option('-c', '--load', dest='load',
                       default=False, help='load file model')
     parser.add_option('--model', '-m', default='MODEL.pth',
@@ -350,6 +360,8 @@ def parse_args():
                       help='save results per specified number of epochs')
     parser.add_option('--validate_every', dest='validate_every', default=50, type='int',
                       help='validate model per specified number of epochs')
+    parser.add_option('--rollout_every', dest='rollout_every', default=50000, type='int',
+                      help='rollout output files every # of epochs')
 
     parser.add_option('-d', '--data', dest='data_dir', type='string',
                       help='the directory with input data')
@@ -407,6 +419,8 @@ if __name__ == '__main__':
                 max_train_time=args.max_train_time,
                 save_every=args.save_every,
                 val_every=args.validate_every,
+                rollout=args.rollout_every,
+                prule=args.prule,
                 img_width=128,
                 img_height=128,
                 img_chan=3,
