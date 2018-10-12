@@ -4,13 +4,15 @@ from optparse import OptionParser
 import h5py
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
-def render_data(hdf5_file, window_size = 1000):
+def render_data(hdf5_file, runs_per_epoch, window_size=1000):
     """
     Renders data collected during training session
     Arguments:
         hdf5_file:      The file with data points collected
+        runs_per_epoch: The number of runs per epoch (train samples count)
         window_size:    The averaging window size
     """
     # read input data
@@ -21,38 +23,53 @@ def render_data(hdf5_file, window_size = 1000):
 
         all_losses = f["train/all_losses"][()]
 
-    n_epochs = all_losses.shape[0]
+    n_runs = all_losses.shape[0]
     n_val_points = val_train_losses.shape[0]
-    print("Number of epochs: %d, number of validation points: %d" % (n_epochs, n_val_points))
+    print("Total number of runs: %d, number of validation points: %d, runs per epoch: %d, window: %d"
+            % (n_runs, n_val_points, runs_per_epoch, window_size))
 
-    fig = plt.figure()
+    nsubplots = 0
+    if n_val_points > 0:
+        nsubplots = 1
+    if n_runs > 0:
+        nsubplots += 1
+
+    fig, (ax1, ax2) = plt.subplots(ncols=nsubplots)
     # Render validation data points
     if n_val_points > 0:
-        plt.subplot(2, 1, 1)
-        plt.xlim([0, n_val_points])
-        x = np.arange(n_val_points)
-        plot_with_average(x, val_train_losses, style='r', label='Train Loss', window=1)
-        plot_with_average(x, val_test_losses, style='b', label='Validation Loss', window=5)
-        plot_with_average(x, val_accuracies, style='g', label='Validation accuracy', window=5)
-        plt.ylabel('loss')
-        plt.legend()
-        plt.title("Validation data")
+        # Convert validation points to pandas data frame
+        df = pd.DataFrame(val_train_losses, columns=['Train Loss'])
+        df['Test Loss'] = pd.Series(val_test_losses, index=df.index)
+        df['Accuracy'] = pd.Series(val_accuracies, index=df.index)
 
-    if n_epochs > 0:
-        plt.subplot(2, 1, 2)
-        plt.xlim([0, n_epochs])
-        x = np.arange(n_epochs)
-        plot_with_average(x, all_losses, style='r', label='Train Loss', window=window_size)
-        plt.xlabel('runs')
-        plt.ylabel('loss')
-        plt.title("Training loss")
+        ax1.set_xlim([0, n_val_points])
+        ax = df.plot(secondary_y=['Accuracy'], ax=ax1, style=['b', 'g', 'r'])
+        ax1.set_ylabel('loss')
+        ax1.set_xlabel('epochs')
+        ax1.right_ax.set_ylabel('accuracy')
+        ax1.set_title("Validation Data")
 
+
+    if n_runs > 0:
+        if runs_per_epoch > 0:
+            ax2.set_xlim(runs_per_epoch, n_runs)
+        else:
+            ax2.set_xlim(n_runs)
+
+        x = np.arange(n_runs)
+
+        plot_with_average(x, all_losses, ax=ax2, style='r', label='Train Loss', window=window_size)
+        ax2.set_xlabel('runs')
+        ax2.set_ylabel('loss')
+        ax2.set_title("Training Costs")
+
+    plt.tight_layout()
     plt.show()
 
-def plot_with_average(x, y, style, label, window):
-    plt.plot(x, y, style, alpha=0.5)
+def plot_with_average(x, y, ax, style, label, window):
+    ax.plot(x, y, style, alpha=0.5)
     y_av = moving_average(y, window)
-    plt.plot(x, y_av, style, label=label)
+    ax.plot(x, y_av, style, label=label)
 
 
 def moving_average(data, window_size):
@@ -72,6 +89,8 @@ def parse_args():
     parser = OptionParser()
     parser.add_option('--data-file', '-f', default='train_data.hdf5',
                         help="The path to the data file")
+    parser.add_option('--runs-per-epoch', '-r', type='int',
+                        help="The number of runs per epoch (train samples count)")
     parser.add_option('--avg-window-size', '-w', default='1', type='int',
                         help="The window size for moving average")
 
@@ -81,4 +100,6 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
 
-    render_data(args.data_file, args.avg_window_size)
+    render_data(hdf5_file=args.data_file,
+                runs_per_epoch=args.runs_per_epoch,
+                window_size=args.avg_window_size)

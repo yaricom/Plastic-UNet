@@ -16,4 +16,14 @@ if [[ "$#" -lt 1 ]]; then
     exit 0
 fi
 
-/usr/bin/env python3 src/utils/data_visualization.py --data-file $1 --avg-window-size 1000
+w_size=1000
+if [[ "$#" -ge 2 ]]; then
+    w_size=$2
+fi
+
+runs=-1
+if [[ "$#" -eq 3 ]]; then
+    runs=$3
+fi
+
+/usr/bin/env python3 src/utils/data_visualization.py --data-file $1 --avg-window-size $w_size --runs-per-epoch $runs
