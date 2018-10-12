@@ -174,7 +174,7 @@ def train(net, X, y,
             if epoch > 100:
                 loss_last_100 = np.mean(all_losses[-samples_count * 100])
                 if params['debug']:
-                    print("Average loss over the last 100 epochs: ", losslast100)
+                    print("Average loss over the last 100 epochs: ", loss_last_100)
 
             loss_between_saves = 0.0
             # Save trained data, network parameters and losses
