@@ -10,6 +10,6 @@ help () {
     echo
 }
 
-/usr/bin/env python3 src/infer.py --model ./out/train_50_net.pth \
-                                  --data ./data1 --out ./out \
-                                  --visualize True --save True
+/usr/bin/env python3 src/infer.py --model ./out/train_net.pth \
+                                  --data ./data2 --out ./out \
+                                  --visualize True --save False
