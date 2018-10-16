@@ -54,7 +54,7 @@ def render_data(hdf5_file, runs_per_epoch, window_size=1000):
         if runs_per_epoch > 0:
             ax2.set_xlim(runs_per_epoch, n_runs)
         else:
-            ax2.set_xlim(n_runs)
+            ax2.set_xlim(0, n_runs)
 
         x = np.arange(n_runs)
 
