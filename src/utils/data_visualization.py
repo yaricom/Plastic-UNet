@@ -34,7 +34,9 @@ def render_data(hdf5_file, runs_per_epoch, window_size=1000):
     if n_runs > 0:
         nsubplots += 1
 
-    fig, (ax1, ax2) = plt.subplots(ncols=nsubplots)
+    
+    fig, axes = plt.subplots(ncols=nsubplots)
+
     # Render validation data points
     if n_val_points > 0:
         # Convert validation points to pandas data frame
@@ -42,26 +44,27 @@ def render_data(hdf5_file, runs_per_epoch, window_size=1000):
         df['Test Loss'] = pd.Series(val_test_losses, index=df.index)
         df['Accuracy'] = pd.Series(val_accuracies, index=df.index)
 
-        ax1.set_xlim([0, n_val_points])
-        ax = df.plot(secondary_y=['Accuracy'], ax=ax1, style=['b', 'g', 'r'])
-        ax1.set_ylabel('loss')
-        ax1.set_xlabel('epochs')
-        ax1.right_ax.set_ylabel('accuracy')
-        ax1.set_title("Validation Data")
-
+        axes[0].set_xlim([0, n_val_points])
+        ax = df.plot(secondary_y=['Accuracy'], ax=axes[0], style=['b', 'g', 'r'])
+        axes[0].set_ylabel('loss')
+        axes[0].set_xlabel('epochs')
+        axes[0].right_ax.set_ylabel('accuracy')
+        axes[0].set_title("Validation Data")
+    else:
+        axes = [None, axes]
 
     if n_runs > 0:
         if runs_per_epoch > 0:
-            ax2.set_xlim(runs_per_epoch, n_runs)
+            axes[1].set_xlim(runs_per_epoch, n_runs)
         else:
-            ax2.set_xlim(0, n_runs)
+            axes[1].set_xlim(0, n_runs)
 
         x = np.arange(n_runs)
 
-        plot_with_average(x, all_losses, ax=ax2, style='r', label='Train Loss', window=window_size)
-        ax2.set_xlabel('runs')
-        ax2.set_ylabel('loss')
-        ax2.set_title("Training Costs")
+        plot_with_average(x, all_losses, ax=axes[1], style='r', label='Train Loss', window=window_size)
+        axes[1].set_xlabel('runs')
+        axes[1].set_ylabel('loss')
+        axes[1].set_title("Training Costs")
 
     plt.tight_layout()
     plt.show()
