@@ -6,7 +6,7 @@ from torch.autograd import Variable
 
 
 class UNetp(nn.Module):
-    def __init__(self, n_channels, n_classes, device, alfa_type='free', rule='hebb', nbf=128):
+    def __init__(self, n_channels, n_classes, device, alfa_type='free', rule='hebb', nbf=128, batch_norm=False, bilinear_upsample=False):
         """
         Creates new U-Net network with plastic learning rule implemented
         Arguments:
@@ -33,16 +33,16 @@ class UNetp(nn.Module):
 
 
         # The DOWN network structure
-        self.inc = inconv(n_channels, 8)
-        self.down1 = down(8, 16)
-        self.down2 = down(16, 32)
-        self.down3 = down(32, 64)
-        self.down4 = down(64, 64)
+        self.inc = inconv(n_channels, 8, batch_norm=batch_norm)
+        self.down1 = down(8, 16, batch_norm=batch_norm)
+        self.down2 = down(16, 32, batch_norm=batch_norm)
+        self.down3 = down(32, 64, batch_norm=batch_norm)
+        self.down4 = down(64, 64, batch_norm=batch_norm)
         # The UP network structure
-        self.up1 = up(128, 32)
-        self.up2 = up(64, 16)
-        self.up3 = up(32, 8)
-        self.up4 = up(16, 8)
+        self.up1 = up(128, 32, batch_norm=batch_norm, bilinear=bilinear_upsample)
+        self.up2 = up(64, 16, batch_norm=batch_norm, bilinear=bilinear_upsample)
+        self.up3 = up(32, 8, batch_norm=batch_norm, bilinear=bilinear_upsample)
+        self.up4 = up(16, 8, batch_norm=batch_norm, bilinear=bilinear_upsample)
         self.outc = outconv(8, n_classes)
 
          # Move network parameters to the specified device
@@ -98,7 +98,7 @@ class double_conv(nn.Module):
     Creates two subsequent unpadded convolution layers with 3x3 kernel size
     followed by batch normalization (optional) and ReLU
     """
-    def __init__(self, in_ch, out_ch, batch_norm=True):
+    def __init__(self, in_ch, out_ch, batch_norm):
         super(double_conv, self).__init__()
         if batch_norm:
             self.conv = nn.Sequential(
@@ -123,9 +123,9 @@ class double_conv(nn.Module):
 
 
 class inconv(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, batch_norm=True):
         super(inconv, self).__init__()
-        self.conv = double_conv(in_ch, out_ch)
+        self.conv = double_conv(in_ch, out_ch, batch_norm)
 
     def forward(self, x):
         x = self.conv(x)
@@ -133,11 +133,11 @@ class inconv(nn.Module):
 
 
 class down(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, batch_norm=True):
         super(down, self).__init__()
         self.mpconv = nn.Sequential(
             nn.MaxPool2d(2),
-            double_conv(in_ch, out_ch)
+            double_conv(in_ch, out_ch, batch_norm)
         )
 
     def forward(self, x):
@@ -146,7 +146,7 @@ class down(nn.Module):
 
 
 class up(nn.Module):
-    def __init__(self, in_ch, out_ch, bilinear=True):
+    def __init__(self, in_ch, out_ch, bilinear=True, batch_norm=True):
         super(up, self).__init__()
 
         if bilinear:
@@ -154,7 +154,7 @@ class up(nn.Module):
         else:
             self.up = nn.ConvTranspose2d(in_ch//2, in_ch//2, 2, stride=2)
 
-        self.conv = double_conv(in_ch, out_ch)
+        self.conv = double_conv(in_ch, out_ch, batch_norm)
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
