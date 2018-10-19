@@ -7,8 +7,6 @@ import time
 
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-%matplotlib inline
 
 import cv2
 
@@ -26,6 +24,7 @@ from keras.layers.pooling import MaxPooling2D
 from keras.layers.merge import concatenate
 from keras.callbacks import EarlyStopping, ModelCheckpoint, Callback
 from keras import backend as K
+from keras.engine.topology import Layer
 
 import tensorflow as tf
 from tensorflow.python.layers import base
@@ -48,29 +47,30 @@ class TimedStopping(Callback):
         self.epoch_start_time = time.time()
 
     def on_epoch_end(self, epoch, logs=None):
-        epoch_time = time.time() - epoch_start_time
+        epoch_time = time.time() - self.epoch_start_time
         next_epoch_finish_time = epoch_time + time.time()
         terminate_training = (self.stop_time > 0 and next_epoch_finish_time >= self.stop_time)
         if terminate_training:
-            print("Training terminated du to the time limits")
+            print("Training terminated due to the time limits............")
             self.model.stop_training = True
 
 ############################################################
 # The coordinate convolution implementation
 ############################################################
-class AddCoords(base.Layer):
+class AddCoords(Layer):
     def __init__(self, x_dim=64, y_dim=64, with_r=False):
         """Add coords to a tensor"""
-        super(AddCoords, self).__init__()
         self.x_dim = x_dim
         self.y_dim = y_dim
         self.with_r = with_r
+        super(AddCoords, self).__init__()
 
     def call(self, input_tensor):
         """
         input_tensor: (batch, x_dim, y_dim, c)
         """
-        batch_size_tensor = tf.shape(input_tensor)[0] xx_ones = tf.ones([batch_size_tensor, self.x_dim], dtype=tf.int32)
+        batch_size_tensor = tf.shape(input_tensor)[0]
+        xx_ones = tf.ones([batch_size_tensor, self.x_dim], dtype=tf.int32)
         xx_ones = tf.expand_dims(xx_ones, -1)
         xx_range = tf.tile(tf.expand_dims(tf.range(self.x_dim), 0), [batch_size_tensor, 1])
         xx_range = tf.expand_dims(xx_range, 1)
@@ -83,8 +83,8 @@ class AddCoords(base.Layer):
         yy_range = tf.expand_dims(yy_range, -1)
         yy_channel = tf.matmul(yy_range, yy_ones)
         yy_channel = tf.expand_dims(yy_channel, -1)
-        xx_channel = tf.cast(xx_channel, ’float32’) / (self.x_dim - 1)
-        yy_channel = tf.cast(yy_channel, ’float32’) / (self.y_dim - 1)
+        xx_channel = tf.cast(xx_channel, 'float32') / (self.x_dim - 1)
+        yy_channel = tf.cast(yy_channel, 'float32') / (self.y_dim - 1)
         xx_channel = xx_channel*2 - 1
         yy_channel = yy_channel*2 - 1
 
@@ -94,18 +94,35 @@ class AddCoords(base.Layer):
             ret = tf.concat([ret, rr], axis=-1)
         return ret
 
-class CoordConv(base.Layer):
+    def compute_output_shape(self, input_shape):
+        channels = 3
+        if self.with_r:
+            channels = 4
+        return (input_shape[0], input_shape[1], input_shape[2], channels)
+
+class CoordConv(Layer):
 
     def __init__(self, x_dim, y_dim, with_r, *args, **kwargs):
         """CoordConv layer as in the paper."""
-        super(CoordConv, self).__init__()
         self.addcoords = AddCoords(x_dim=x_dim, y_dim=y_dim, with_r=with_r)
-        self.conv = tf.layers.Conv2D(*args, **kwargs)
+        self.conv = Conv2D(**kwargs)
+        super(CoordConv, self).__init__()
 
     def call(self, input_tensor):
         ret = self.addcoords(input_tensor)
         ret = self.conv(ret)
         return ret
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], input_shape[1], input_shape[2], self.conv.filters)
+
+    def get_config(self):
+        config = {'x_dim':self.addcoords.x_dim,
+                  'y_dim':self.addcoords.y_dim,
+                  'with_r':self.addcoords.with_r
+                  }
+        conv_config = self.conv.get_config()
+        return dict(list(conv_config.items()) + list(config.items()))
 
 ############################################################
 # Define IoU metric
@@ -126,55 +143,59 @@ def mean_iou(y_true, y_pred):
 ############################################################
 
 def construct_model(im_height, im_width, im_chan):
-    with_r = False
+    with_r = True
 
     inputs = Input((im_height, im_width, im_chan))
     s = Lambda(lambda x: x / 255) (inputs)
 
-    c1 = CoordConv(im_height, im_width, with_r, 8, (3, 3), activation='relu', padding='same') (s)
-    c1 = CoordConv(im_height, im_width, with_r, 8, (3, 3), activation='relu', padding='same') (c1)
+    print("Inputs shape:", inputs)
+
+    cc1 = CoordConv(im_height, im_width, with_r, filters=8, kernel_size=(1, 1), activation='relu', padding='same') (s)
+
+    c1 = Conv2D(8, (3, 3), activation='relu', padding='same') (cc1)
+    c1 = Conv2D(8, (3, 3), activation='relu', padding='same') (c1)
     p1 = MaxPooling2D((2, 2)) (c1)
 
-    c2 = CoordConv(im_height, im_width, with_r, 16, (3, 3), activation='relu', padding='same') (p1)
-    c2 = CoordConv(im_height, im_width, with_r, 16, (3, 3), activation='relu', padding='same') (c2)
+    c2 = Conv2D(16, (3, 3), activation='relu', padding='same') (p1)
+    c2 = Conv2D(16, (3, 3), activation='relu', padding='same') (c2)
     p2 = MaxPooling2D((2, 2)) (c2)
 
-    c3 = CoordConv(im_height, im_width, with_r, 32, (3, 3), activation='relu', padding='same') (p2)
-    c3 = CoordConv(im_height, im_width, with_r, 32, (3, 3), activation='relu', padding='same') (c3)
+    c3 = Conv2D(32, (3, 3), activation='relu', padding='same') (p2)
+    c3 = Conv2D(32, (3, 3), activation='relu', padding='same') (c3)
     p3 = MaxPooling2D((2, 2)) (c3)
 
-    c4 = CoordConv(im_height, im_width, with_r, 64, (3, 3), activation='relu', padding='same') (p3)
-    c4 = CoordConv(im_height, im_width, with_r, 64, (3, 3), activation='relu', padding='same') (c4)
+    c4 = Conv2D(64, (3, 3), activation='relu', padding='same') (p3)
+    c4 = Conv2D(64, (3, 3), activation='relu', padding='same') (c4)
     p4 = MaxPooling2D(pool_size=(2, 2)) (c4)
 
-    c5 = CoordConv(im_height, im_width, with_r, 128, (3, 3), activation='relu', padding='same') (p4)
-    c5 = CoordConv(im_height, im_width, with_r, 128, (3, 3), activation='relu', padding='same') (c5)
+    c5 = Conv2D(128, (3, 3), activation='relu', padding='same') (p4)
+    c5 = Conv2D(128, (3, 3), activation='relu', padding='same') (c5)
 
     u6 = Conv2DTranspose(64, (2, 2), strides=(2, 2), padding='same') (c5)
     u6 = concatenate([u6, c4])
-    c6 = CoordConv(im_height, im_width, with_r, 64, (3, 3), activation='relu', padding='same') (u6)
-    c6 = CoordConv(im_height, im_width, with_r, 64, (3, 3), activation='relu', padding='same') (c6)
+    c6 = Conv2D(64, (3, 3), activation='relu', padding='same') (u6)
+    c6 = Conv2D(64, (3, 3), activation='relu', padding='same') (c6)
 
     u7 = Conv2DTranspose(32, (2, 2), strides=(2, 2), padding='same') (c6)
     u7 = concatenate([u7, c3])
-    c7 = CoordConv(im_height, im_width, with_r, 32, (3, 3), activation='relu', padding='same') (u7)
-    c7 = CoordConv(im_height, im_width, with_r, 32, (3, 3), activation='relu', padding='same') (c7)
+    c7 = Conv2D(32, (3, 3), activation='relu', padding='same') (u7)
+    c7 = Conv2D(32, (3, 3), activation='relu', padding='same') (c7)
 
     u8 = Conv2DTranspose(16, (2, 2), strides=(2, 2), padding='same') (c7)
     u8 = concatenate([u8, c2])
-    c8 = CoordConv(im_height, im_width, with_r, 16, (3, 3), activation='relu', padding='same') (u8)
-    c8 = CoordConv(im_height, im_width, with_r, 16, (3, 3), activation='relu', padding='same') (c8)
+    c8 = Conv2D(16, (3, 3), activation='relu', padding='same') (u8)
+    c8 = Conv2D(16, (3, 3), activation='relu', padding='same') (c8)
 
     u9 = Conv2DTranspose(8, (2, 2), strides=(2, 2), padding='same') (c8)
     u9 = concatenate([u9, c1], axis=3)
-    c9 = CoordConv(im_height, im_width, with_r, 8, (3, 3), activation='relu', padding='same') (u9)
-    c9 = CoordConv(im_height, im_width, with_r, 8, (3, 3), activation='relu', padding='same') (c9)
+    c9 = Conv2D(8, (3, 3), activation='relu', padding='same') (u9)
+    c9 = Conv2D(8, (3, 3), activation='relu', padding='same') (c9)
 
-    outputs = CoordConv(im_height, im_width, with_r, 1, (1, 1), activation='sigmoid') (c9)
+    outputs = Conv2D(1, (1, 1), activation='sigmoid') (c9)
 
     model = Model(inputs=[inputs], outputs=[outputs])
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=[mean_iou])
-    model.summary()
+    #model.summary()
 
     return model
 
@@ -183,23 +204,23 @@ def construct_model(im_height, im_width, im_chan):
 # Do training with given model
 ############################################################
 
-def do_training(net, X_train, Y_train, max_train_time, model_file, verbose=False):
+def do_training(model, X_train, Y_train, epochs, max_train_time, model_file, verbose=0):
     print("Training started at: %d sec and set to be run for: %d sec" %
             (time.time(), max_train_time))
 
-    earlystopper = EarlyStopping(patience=5, verbose=1)
+    earlystopper = EarlyStopping(patience=5, verbose=verbose)
     checkpointer = ModelCheckpoint(model_file, verbose=verbose, save_best_only=True)
     timedstopper = TimedStopping(max_train_time)
-    results = model.fit(X_train, Y_train, validation_split=0.1, batch_size=8, epochs=30,
-                        callbacks=[earlystopper, checkpointer, timedstopper])
+    results = model.fit(X_train, Y_train, validation_split=0.1, batch_size=8, epochs=epochs,
+                        callbacks=[earlystopper, checkpointer, timedstopper], verbose=verbose)
 
     print('Traing Complete!')
 
-def start_training(train_ids, max_train_time, path_train, im_height, im_width, im_chan, model_file, verbose=False):
+def start_training(train_ids, epochs, max_train_time, path_train, im_height, im_width, im_chan, model_file, verbose=0):
     # Get and resize train images and masks
     X_train = np.zeros((len(train_ids), im_height, im_width, im_chan), dtype=np.uint8)
     Y_train = np.zeros((len(train_ids), im_height, im_width, 1), dtype=np.bool)
-    print('Getting and resizing train images and masks ... ')
+    print('Getting and resizing train images and masks ... ', len(train_ids))
     sys.stdout.flush()
     for n, id_ in enumerate(train_ids):
         path = path_train
@@ -213,11 +234,13 @@ def start_training(train_ids, max_train_time, path_train, im_height, im_width, i
     print('Done!')
 
     # Do model fitting
-    net = construct_model(im_height, im_width, im_chan)
-    do_training(net=net,
+    model = construct_model(im_height, im_width, im_chan)
+    do_training(model=model,
                 X_train=X_train,
                 Y_train=Y_train,
+                epochs=epochs,
                 max_train_time=max_train_time,
+                model_file=model_file,
                 verbose=verbose)
 
 
@@ -225,10 +248,10 @@ def start_training(train_ids, max_train_time, path_train, im_height, im_width, i
 ############################################################
 # Starts inference with given model
 ############################################################
-def start_prediction(model_file, test_ids, path_test, im_height, im_width, im_chan, verbose=False):
+def start_prediction(model_file, test_ids, path_test, im_height, im_width, im_chan, verbose=0):
     X_test = np.zeros((len(test_ids), im_height, im_width, im_chan), dtype=np.uint8)
     sizes_test = []
-    print('Getting and resizing test images ... ')
+    print('Getting and resizing test images ... ', len(test_ids))
     sys.stdout.flush()
     for n, id_ in enumerate(test_ids):
         path = path_test
@@ -242,7 +265,9 @@ def start_prediction(model_file, test_ids, path_test, im_height, im_width, im_ch
 
     # Loading model and do prediction
     print('Loading model from:', model_file)
-    model = load_model(model_file, custom_objects={'mean_iou': mean_iou})
+    custom_objects={'CoordConv':CoordConv,
+                    'mean_iou': mean_iou}
+    model = load_model(model_file, custom_objects=custom_objects)
 
     print('Start prediction!')
     preds_test = model.predict(X_test, verbose=verbose)
@@ -254,7 +279,7 @@ def start_prediction(model_file, test_ids, path_test, im_height, im_width, im_ch
                                            (sizes_test[i][0], sizes_test[i][1]),
                                            mode='constant', preserve_range=True))
 
-    print('Prediction complete! Output images shape: %s' % preds_test_upsampled[0].shape)
+    print('Prediction complete! Output images shape:', preds_test_upsampled[0].shape)
 
     return preds_test_upsampled
 
@@ -305,28 +330,38 @@ im_width = 128
 im_height = 128
 im_chan = 1
 input_data_dir="../input"
-path_train = input_data_dir + 'train/'
-path_test = input_data_dir + 'test/'
-model_file_name = 'model-tgs-salt-1.h5'
+data_dir=input_data_dir + "/tgs-salt-identification-challenge"
+path_train = data_dir + '/train/'
+path_test = data_dir + '/test/'
+model_file_name = 'model-tgs-salt-4.h5'
 
-max_train_time=14500#21000#19600 #
+epochs=500
+max_train_time=14500#21000#19600 #180#
 
 do_train = True#False#
 do_inference = False#True#
 
+short_run = False#True#
+
+train_ids = next(os.walk(path_train+"images"))[2]
+test_ids = next(os.walk(path_test+"images"))[2]
+
+if short_run:
+    train_ids = train_ids[:100]
+    test_ids = test_ids[:100]
 
 if do_train:
     print("Start training")
-    train_ids = next(os.walk(path_train+"images"))[2]
 
     start_training(train_ids=train_ids,
+                   epochs=epochs,
                    max_train_time=max_train_time,
                    path_train=path_train,
                    im_height=im_height,
                    im_width=im_width,
                    im_chan=im_chan,
                    model_file=model_file_name,
-                   verbose=False)
+                   verbose=0)
 
 ###################################
 # Do prediction
@@ -336,7 +371,6 @@ subm_file="submission.csv"
 
 if do_inference:
     print("Starting inference with model:", model_file)
-    test_ids = next(os.walk(path_test+"images"))[2]
 
     predicted = start_prediction(model_file=model_file,
                                  test_ids=test_ids,
@@ -344,7 +378,7 @@ if do_inference:
                                  im_height=im_height,
                                  im_width=im_width,
                                  im_chan=im_chan,
-                                 verbose=False)
+                                 verbose=0)
 
     # Prepare submission file
     pred_dict = {fn[:-4]:RLenc(np.round(predicted[i])) for i, fn in enumerate(test_ids)}
