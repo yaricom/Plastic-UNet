@@ -4,6 +4,7 @@ import sys
 import random
 import warnings
 import time
+import pickle
 
 import pandas as pd
 import numpy as np
@@ -142,8 +143,7 @@ def mean_iou(y_true, y_pred):
 # The CNN U-Net pyramide build with coordinated convolution layers
 ############################################################
 
-def construct_model(im_height, im_width, im_chan):
-    with_r = True
+def construct_model(im_height, im_width, im_chan, with_r=True):
 
     inputs = Input((im_height, im_width, im_chan))
     s = Lambda(lambda x: x / 255) (inputs)
@@ -211,12 +211,24 @@ def do_training(model, X_train, Y_train, epochs, max_train_time, model_file, ver
     earlystopper = EarlyStopping(patience=5, verbose=verbose)
     checkpointer = ModelCheckpoint(model_file, verbose=verbose, save_best_only=True)
     timedstopper = TimedStopping(max_train_time)
+    #results = model.fit(X_train, Y_train, validation_split=0.1, batch_size=8, epochs=epochs,
+    #                    callbacks=[earlystopper, checkpointer, timedstopper], verbose=verbose)
     results = model.fit(X_train, Y_train, validation_split=0.1, batch_size=8, epochs=epochs,
-                        callbacks=[earlystopper, checkpointer, timedstopper], verbose=verbose)
+                        callbacks=[checkpointer, timedstopper], verbose=verbose)
 
-    print('Traing Complete!')
+    print('Traing Complete! In: %d epochs' % len(results.epoch))
+    # save final model
+    model_file = model_file + '_final'
+    model.save(model_file, overwrite=True)
 
-def start_training(train_ids, epochs, max_train_time, path_train, im_height, im_width, im_chan, model_file, verbose=0):
+    # save history for analysis
+    history_file_name = model_file + "_history.pickle"
+    with open(history_file_name, 'wb') as file_pi:
+        pickle.dump(results.history, file_pi)
+
+    print('History dump Complete to file: ', history_file_name)
+
+def start_training(train_ids, epochs, max_train_time, path_train, im_height, im_width, im_chan, model_file, with_r, verbose=0):
     # Get and resize train images and masks
     X_train = np.zeros((len(train_ids), im_height, im_width, im_chan), dtype=np.uint8)
     Y_train = np.zeros((len(train_ids), im_height, im_width, 1), dtype=np.bool)
@@ -234,7 +246,10 @@ def start_training(train_ids, epochs, max_train_time, path_train, im_height, im_
     print('Done!')
 
     # Do model fitting
-    model = construct_model(im_height, im_width, im_chan)
+    model = construct_model(im_height=im_height,
+                            im_width=im_width,
+                            im_chan=im_chan,
+                            with_r=with_r)
     do_training(model=model,
                 X_train=X_train,
                 Y_train=Y_train,
@@ -333,10 +348,11 @@ input_data_dir="../input"
 data_dir=input_data_dir + "/tgs-salt-identification-challenge"
 path_train = data_dir + '/train/'
 path_test = data_dir + '/test/'
-model_file_name = 'model-tgs-salt-4.h5'
+model_file_name = 'model-tgs-salt-6.h5'
+with_r=False
 
-epochs=500
-max_train_time=14500#21000#19600 #180#
+epochs=50000
+max_train_time=7200#21000#19600#180#
 
 do_train = True#False#
 do_inference = False#True#
@@ -361,13 +377,14 @@ if do_train:
                    im_width=im_width,
                    im_chan=im_chan,
                    model_file=model_file_name,
+                   with_r=with_r,
                    verbose=0)
 
 ###################################
 # Do prediction
 ###################################
 model_file=input_data_dir + '/coord-conv-model/' + model_file_name
-subm_file="submission.csv"
+subm_file="submission-6.csv"
 
 if do_inference:
     print("Starting inference with model:", model_file)
