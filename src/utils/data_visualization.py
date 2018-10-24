@@ -6,6 +6,38 @@ import h5py
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+plt.style.use('seaborn-white')
+import seaborn as sns
+sns.set_style("white")
+
+def plot_coverage(train_df):
+    """
+    Plots salt coverage
+    Arguments:
+        train_df: The data frame with train data coverage inputs
+    """
+    fig, axs = plt.subplots(1, 2, figsize=(15,5))
+    sns.distplot(train_df.coverage, kde=False, ax=axs[0])
+    sns.distplot(train_df.coverage_class, bins=10, kde=False, ax=axs[1])
+    plt.suptitle("Salt coverage")
+    axs[0].set_xlabel("Coverage")
+    axs[1].set_xlabel("Coverage class")
+
+    plt.show()
+
+def plot_depth(train_df, test_df):
+    """
+    Plots depth distribution
+    Arguments:
+        train_df:   The data frame with train data inputs
+        test_df:    The data frame with test data inputs
+    """
+    sns.distplot(train_df.z, label="Train")
+    sns.distplot(test_df.z, label="Test")
+    plt.legend()
+    plt.title("Depth distribution")
+
+    plt.show()
 
 def render_data(hdf5_file, runs_per_epoch, window_size=1000):
     """
@@ -34,7 +66,7 @@ def render_data(hdf5_file, runs_per_epoch, window_size=1000):
     if n_runs > 0:
         nsubplots += 1
 
-    
+
     fig, axes = plt.subplots(ncols=nsubplots)
 
     # Render validation data points
