@@ -16,10 +16,12 @@ from skimage.transform import resize
 def load_image(path, output_shape):
     """
     Loads image under specified path and resize it to conform given output shape
+    if appropriate
     """
-    img = imread(path)
-    x = resize(img, output_shape, mode='constant')
-    return x
+    img = imread(path, as_grey=True)
+    if img.shape != output_shape:
+        img = resize(img, output_shape, mode='constant', preserve_range=True)
+    return img
 
 def create_hdf5_data_set(data_dir,
                          out_file="dataset.hdf5",
