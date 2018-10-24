@@ -11,6 +11,7 @@ from optparse import OptionParser
 import h5py
 from sklearn.model_selection import train_test_split
 import numpy as np
+import pandas as pd
 
 import torch
 import torch.nn as nn
@@ -20,39 +21,30 @@ from torch import optim
 from unet import UNetp
 
 from utils import plot_train_check
-from utils import hwc_to_chw
 from utils import load_image
+
+from utils import plot_coverage
+from utils import plot_depth
 
 from eval import eval_net
 
-def train(net, X, y,
-          params):
+def train(net, X_train, X_val, y_train, y_val, params):
     """
     Do network training
     Arguments:
-        net:    The network to be trained
-        X:      The training data samples
-        y:      The training data labels
-        params: The hyper parameters to use
+        net:        The network to be trained
+        X_train:    The training samples
+        X_val:      The validation samples
+        y_train:    The training labels
+        y_val:      The validation labels
+        params:     The hyper parameters to use
     """
 
-    # Split dataset into validation and train data
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=params['val_ratio'], random_state=42)
-
-    print("Train samples count: %d, validation: %d" % (X_train.shape[0], X_val.shape[0]))
+    print("Train samples shape:", X_train.shape)
+    print("Train labels shape:", y_train.shape)
+    print("Validation samples shape:", X_val.shape)
+    print("Validation labels shape:", y_val.shape)
     print(params)
-
-    #
-    # Check if training data looks all right
-    #
-    #if params['debug']:
-    #    plot_train_check(X_train, y_train)
-
-    # transpose HWC to CHW image data format accepted by Torch
-    X_train = list(map(hwc_to_chw, X_train))
-    X_val = list(map(hwc_to_chw, X_val))
-    y_train = list(map(hwc_to_chw, y_train))
-    y_val = list(map(hwc_to_chw, y_val))
 
     #
     # The data accumulators
@@ -216,9 +208,32 @@ def train(net, X, y,
             print("Stop time limit: %d, estimated time of next epoch end: %d" %
                     (params['stop_time'], next_epoch_finish_time))
             break
+"""
+def find_best_threshold(net,
+                        data_dir,
+                        img_width=128,
+                        img_height = 128,
+                        img_chan=3,
+                        gpu=True,
+                        visualize=False,
+                        save_results=False,
+                        debug=False):
 
-def start_train(samples,
-                target,
+    Finds best threshold value for IoU metric against validation data.
+    Arguments:
+        net: The trained network to use for inference
+        data_dir: The directory with data samples
+        img_width:      The width of the resized image
+        img_height:     The height of the resized image
+        visualize:      The flag to indicate whether to plot results
+        save_masks:     The flag to indicate whether to save the results
+        img_chan:       The number of channels in input plot_image
+        debug:          The flag to indicate whether to show debug information
+    """
+
+
+
+def start_train(x_train, x_valid, y_train, y_valid,
                 out_dir,
                 model,
                 img_width,
@@ -240,8 +255,10 @@ def start_train(samples,
     """
     Starts network training
     Arguments:
-        samples:        The training samples
-        target:         The training target labels
+        x_train:        The training samples
+        x_valid:        The validation samples
+        y_train:        The training labels
+        y_valid:        The validation labels
         out_dir:        The output directory to store execution results
         model:          The file with network model if needed to load network state before training
         load:           The flag to indicate whether to load network state before
@@ -288,7 +305,13 @@ def start_train(samples,
               "debug":debug}
 
     # Create network structure
-    net = UNetp(n_channels=params['im_chan'], n_classes=1, device=device, rule=prule)
+    net = UNetp(n_channels=params['im_chan'],
+                n_classes=1,
+                nbf=img_width, 
+                batch_norm=False,
+                bilinear_upsample=False,
+                device=device,
+                rule=prule)
 
     if load:
         net.load_state_dict(torch.load(model))
@@ -297,8 +320,10 @@ def start_train(samples,
     # do network training
     try:
         train(net=net,
-              X=samples,
-              y=target,
+              X_train=x_train,
+              X_val=x_valid,
+              y_train=y_train,
+              y_val=y_valid,
               params=params)
     except KeyboardInterrupt:
         torch.save(net.state_dict(), args.out_dir + '/INTERRUPTED.pth')
@@ -310,27 +335,60 @@ def start_train(samples,
 
     return net
 
+def cov_to_class(val):
+    for i in range(0, 11):
+        if val * 10 <= i :
+            return i
+
 def load_train_dataset( data_dir,
                         img_width,
                         img_height,
-                        img_chan):
+                        img_chan,
+                        val_ratio=0.2,
+                        debug=False):
     """
-    Loads train data set from provided directory.
+    Loads train data set from provided directory and split it onto train and validation.
     Arguments:
-        data_dir: The data directory to load training data
+        data_dir:   The data directory to load training data
+        img_width:  The target image width
+        img_height: The target image height
+        img_chan:   The target image channels
+        val_ratio:  The ratio to split train/test data
     Returns:
-        The preprocessed dataset with data samples and target labels
+        The preprocessed dataset with data samples and target labels for training
+        and validation.
     """
-    train_ids = next(os.walk(data_dir + "/train/images"))[2]
-    X_train = np.zeros((len(train_ids), img_height, img_width, img_chan), dtype=np.float64)
-    Y_train = np.zeros((len(train_ids), img_height, img_width, 1), dtype=np.bool)
-    for n, id_ in enumerate(train_ids):
-        x = load_image(data_dir + '/train/images/' + id_, (img_height, img_width, img_chan))
-        X_train[n] = x
-        mask = load_image(data_dir + '/train/masks/' + id_, (img_height, img_width, 1))
-        Y_train[n] = mask
+    # Create data DataFrame
+    train_df = pd.read_csv(data_dir + '/train.csv', index_col='id', usecols=[0])
+    depths_df = pd.read_csv(data_dir + '/depths.csv', index_col='id')
+    train_df = train_df.join(depths_df)
+    test_df = depths_df[~depths_df.index.isin(train_df.index)]
 
-    return X_train, Y_train
+    # Load image data
+    train_df["images"] = [np.array(load_image('{}/train/images/{}.png'.format(data_dir, idx), (img_height, img_width))) for idx in train_df.index]
+    train_df["masks"] = [np.array(load_image('{}/train/masks/{}.png'.format(data_dir, idx), (img_height, img_width))) / 65535 for idx in train_df.index]
+
+    # Calculate and add salt coverage data
+    train_df["coverage"] = train_df.masks.map(np.sum) / (img_height * img_width)
+    train_df["coverage_class"] = train_df.coverage.map(cov_to_class)
+
+    # Plots salt coverage and depth distributions
+    if debug:
+        print(train_df.masks[10])
+        plot_coverage(train_df)
+        plot_depth(train_df, test_df)
+
+    # Create train/validation split stratified by salt coverage
+    ids_train, ids_valid, x_train, x_valid, y_train, y_valid, cov_train, cov_test, depth_train, depth_test = train_test_split(
+        train_df.index.values,
+        np.array(train_df.images.tolist()).reshape(-1, img_chan, img_height, img_width),
+        np.array(train_df.masks.tolist()).reshape(-1, 1, img_height, img_width),
+        train_df.coverage.values,
+        train_df.z.values,
+        test_size=val_ratio, stratify=train_df.coverage_class, random_state=42)
+
+
+    return x_train, x_valid, y_train, y_valid
 
 def parse_args():
     """
@@ -385,30 +443,26 @@ if __name__ == '__main__':
 
     print(args)
 
-    # Get train images and masks
-    if args.dataset_file != None:
-        print('Getting train images and masks from dataset file %s' % args.dataset_file)
-        sys.stdout.flush()
-        with h5py.File(args.dataset_file, 'r') as f:
-            X = f['train/images'][()]
-            y = f['train/masks'][()]
+    # Set values
+    t_img_width=101
+    t_img_height=101
+    t_img_chan=1
 
-        print('Done!')
-    elif args.data_dir != None:
+    # Get train images and masks
+    if args.data_dir != None:
         print('Getting train images and masks from data directory %s' % args.data_dir)
         sys.stdout.flush()
-        X, y = load_train_dataset(data_dir=args.data_dir,
-                                  img_width=128,
-                                  img_height=128,
-                                  img_chan=3)
-
+        x_train, x_valid, y_train, y_valid = load_train_dataset(data_dir=args.data_dir,
+                                                                img_width=t_img_width,
+                                                                img_height=t_img_height,
+                                                                img_chan=t_img_chan,
+                                                                debug=args.debug)
         print('Done!')
     else:
         raise ValueError("The input data directory or dataset file not specified")
 
     # start network training
-    start_train(samples=X,
-                target=y,
+    start_train(x_train, x_valid, y_train, y_valid,
                 out_dir=args.out_dir,
                 model=args.model,
                 load=args.load,
@@ -421,7 +475,7 @@ if __name__ == '__main__':
                 val_every=args.validate_every,
                 rollout=args.rollout_every,
                 prule=args.prule,
-                img_width=128,
-                img_height=128,
-                img_chan=3,
+                img_width=t_img_width,
+                img_height=t_img_height,
+                img_chan=t_img_chan,
                 debug=args.debug)
