@@ -9,3 +9,6 @@ from .img_utils import plot_image_mask
 from .img_utils import hwc_to_chw
 
 from .rle_encode import encode
+
+from .data_visualization import plot_coverage
+from .data_visualization import plot_depth
