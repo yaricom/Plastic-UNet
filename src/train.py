@@ -19,6 +19,7 @@ from torch.autograd import Variable
 from torch import optim
 
 from unet import UNetp
+from unet import UNetpRes
 
 from utils import plot_train_check
 from utils import load_image
@@ -305,13 +306,13 @@ def start_train(x_train, x_valid, y_train, y_valid,
               "debug":debug}
 
     # Create network structure
-    net = UNetp(n_channels=params['im_chan'],
-                n_classes=1,
-                nbf=img_width, 
-                batch_norm=False,
-                bilinear_upsample=False,
-                device=device,
-                rule=prule)
+    net = UNetpRes(n_channels=params['im_chan'],
+                    n_classes=1,
+                    nbf=img_width,
+                    batch_norm=False,
+                    bilinear_upsample=False,
+                    device=device,
+                    rule=prule)
 
     if load:
         net.load_state_dict(torch.load(model))
