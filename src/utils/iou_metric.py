@@ -21,7 +21,7 @@ def get_iou_vector(A, B):
 
 def fast_iou_metric(y_true_in, y_pred_in):
     iou = get_iou_vector(y_true_in, y_pred_in>0.5)
-
+    return iou
 
 def iou_metric(y_true_in, y_pred_in, print_table=False):
     labels = y_true_in
