@@ -3,7 +3,20 @@
 
 import numpy as np
 
-def encode(img, order='F', format=True):
+def encode(im):
+    """
+    Performs RLE encoding of provided binary mask image data with shape (r,c)
+    Arguments:
+        img: is binary mask image, shape (r,c)
+    Returns: run length as an array or string (if format is True)
+    """
+    pixels = im.flatten(order = 'F')
+    pixels = np.concatenate([[0], pixels, [0]])
+    runs = np.where(pixels[1:] != pixels[:-1])[0] + 1
+    runs[1::2] -= runs[::2]
+    return ' '.join(str(x) for x in runs)
+
+def rle_encode(img, order='F', format=True):
     """
     Performs RLE encoding of provided binary mask image data with shape (r,c)
     Arguments:
