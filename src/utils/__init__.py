@@ -1,5 +1,6 @@
 from .iou_metric import iou_metric
 from .iou_metric import iou_metric_batch
+from .iou_metric import fast_iou_metric
 
 from .img_utils import load_image
 from .img_utils import create_hdf5_data_set
@@ -12,3 +13,6 @@ from .rle_encode import encode
 
 from .data_visualization import plot_coverage
 from .data_visualization import plot_depth
+from .data_visualization import plot_best_iou
+
+from .data_set import load_train_dataset

@@ -10,6 +10,23 @@ plt.style.use('seaborn-white')
 import seaborn as sns
 sns.set_style("white")
 
+def plot_best_iou(thresholds, ious):
+    """
+    Plots thersholds vs IoU and best thershold
+    """
+    threshold_best_index = np.argmax(ious)
+    iou_best = ious[threshold_best_index]
+    threshold_best = thresholds[threshold_best_index]
+
+    plt.plot(thresholds, ious)
+    plt.plot(threshold_best, iou_best, "xr", label="Best threshold")
+    plt.xlabel("Threshold")
+    plt.ylabel("IoU")
+    plt.title("Threshold vs IoU ({}, {})".format(threshold_best, iou_best))
+    plt.legend()
+
+    plt.show()
+
 def plot_coverage(train_df):
     """
     Plots salt coverage

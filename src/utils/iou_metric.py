@@ -1,20 +1,47 @@
-# Computes Intersection Over Union metrics, i.e. Jaccard coefficient
+# Computes Intersection Over Union metrics, i.e. Jaccard coefficient over range
+# of thershold coefficients and returns mean
 
 import numpy as np
 
+def get_iou_vector(A, B):
+    batch_size = A.shape[0]
+    metric = []
+    for batch in range(batch_size):
+        t, p = A[batch]>0, B[batch]>0
+        intersection = np.logical_and(t, p)
+        union = np.logical_or(t, p)
+        iou = (np.sum(intersection > 0) + 1e-10 )/ (np.sum(union > 0) + 1e-10)
+        thresholds = np.arange(0.5, 1, 0.05)
+        s = []
+        for thresh in thresholds:
+            s.append(iou > thresh)
+        metric.append(np.mean(s))
+
+    return np.mean(metric)
+
+def fast_iou_metric(y_true_in, y_pred_in):
+    iou = get_iou_vector(y_true_in, y_pred_in>0.5)
+
 
 def iou_metric(y_true_in, y_pred_in, print_table=False):
-    labels = np.array(y_true_in > 0.5).astype(np.float64)
-    y_pred = np.array(y_pred_in > 0.5).astype(np.float64)
+    labels = y_true_in
+    y_pred = y_pred_in
 
-    true_objects = len(np.unique(labels))
-    pred_objects = len(np.unique(y_pred))
+    true_objects = 2
+    pred_objects = 2
 
-    intersection = np.histogram2d(labels.flatten(), y_pred.flatten(), bins=(true_objects, pred_objects))[0]
-
+    #  if all zeros, original code  generate wrong  bins [-0.5 0 0.5],
+    temp1 = np.histogram2d(labels.flatten(), y_pred.flatten(), bins=([0,0.5,1], [0,0.5, 1]))
+    #print(temp1)
+    intersection = temp1[0]
+    #print("temp2 = ",temp1[1])
+    #print(intersection.shape)
+   # print(intersection)
     # Compute areas (needed for finding the union between all objects)
-    area_true = np.histogram(labels, bins = true_objects)[0]
-    area_pred = np.histogram(y_pred, bins = pred_objects)[0]
+    #print(np.histogram(labels, bins = true_objects))
+    area_true = np.histogram(labels,bins=[0,0.5,1])[0]
+    #print("area_true = ",area_true)
+    area_pred = np.histogram(y_pred, bins=[0,0.5,1])[0]
     area_true = np.expand_dims(area_true, -1)
     area_pred = np.expand_dims(area_pred, 0)
 
@@ -23,6 +50,8 @@ def iou_metric(y_true_in, y_pred_in, print_table=False):
 
     # Exclude background from the analysis
     intersection = intersection[1:,1:]
+    intersection[intersection == 0] = 1e-9
+
     union = union[1:,1:]
     union[union == 0] = 1e-9
 
