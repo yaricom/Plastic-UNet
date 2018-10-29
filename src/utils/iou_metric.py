@@ -32,15 +32,8 @@ def iou_metric(y_true_in, y_pred_in, print_table=False):
 
     #  if all zeros, original code  generate wrong  bins [-0.5 0 0.5],
     temp1 = np.histogram2d(labels.flatten(), y_pred.flatten(), bins=([0,0.5,1], [0,0.5, 1]))
-    #print(temp1)
     intersection = temp1[0]
-    #print("temp2 = ",temp1[1])
-    #print(intersection.shape)
-   # print(intersection)
-    # Compute areas (needed for finding the union between all objects)
-    #print(np.histogram(labels, bins = true_objects))
     area_true = np.histogram(labels,bins=[0,0.5,1])[0]
-    #print("area_true = ",area_true)
     area_pred = np.histogram(y_pred, bins=[0,0.5,1])[0]
     area_true = np.expand_dims(area_true, -1)
     area_pred = np.expand_dims(area_pred, 0)
