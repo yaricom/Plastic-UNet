@@ -11,5 +11,6 @@ help () {
 }
 
 /usr/bin/env python3 src/infer.py --model ./out/train_net.pth \
-                                  --data ./data2 --out ./out \
+                                  --data ./data1 --out ./out \
+                                  --mask-threshold 0.5 \
                                   --visualize True --save False

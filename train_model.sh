@@ -11,9 +11,9 @@ help () {
     echo
 }
 
-/usr/bin/env python3 src/train.py --epochs 1000 --save_every 50 --validate_every 1 \
-                                  --learning-rate 3e-5 --step-lr 1e5 \
+/usr/bin/env python3 src/train.py --epochs 5 --save_every 50 --validate_every 1 \
+                                  --learning-rate 3e-4 --step-lr 1e5 \
                                   --max-train-time -1 --rollout_every 100\
-                                  --prule oja --debug \
-                                  --data ./data1 --out ./out
+                                  --prule hebb \
+                                  --data ./data1 --out ./out --debug
 #                                  --dataset ./data/dataset.hdf5 --out ./out
