@@ -5,6 +5,7 @@ import random
 import warnings
 import pickle
 import time
+from datetime import datetime
 
 import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
@@ -559,8 +560,10 @@ def train(net, X_train, X_val, y_train, y_val, params):
     criterion = nn.BCELoss()
 
     if params['stop_time'] > 0:
-        print("Training started at: %d sec and set to stop at: %d sec" %
-                (time.time(), params['stop_time']))
+        start = datetime.fromtimestamp(time.time()).strftime("%B %d, %Y %H:%M:%S")
+        stop = datetime.fromtimestamp(params['stop_time']).strftime("%B %d, %Y %H:%M:%S")
+        print("Training started at: [%s] and set to stop at: [%s]" %
+                (start, stop))
 
     for epoch in range(params['epochs']):
         if params['debug']:
