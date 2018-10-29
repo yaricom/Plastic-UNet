@@ -10,15 +10,15 @@ from torch.autograd import no_grad
 import h5py
 import numpy as np
 import pandas as pd
-from skimage.transform import resize
 from skimage.io import imsave
 
 from unet import UNetp
+from unet import UNetpRes
 
 from utils import hwc_to_chw
 from utils import plot_image_mask
 from utils import plot_test_check
-from utils import load_image
+from utils import load_test_dataset
 
 from utils import encode
 
@@ -31,7 +31,6 @@ def inference(net,
         net:            The trained network
         img_data:       The input image data for inference
         device:         The Torch device to be used
-        mask_threshold: The minimum probability value to consider a mask pixel white
     Return:
         the predicted mask image
     """
@@ -46,109 +45,88 @@ def inference(net,
     return mask
 
 def predict(net,
-            data_dir,
-            out_dir,
-            test_ids,
-            subm_file="submission.csv",
-            mask_threshold=0.5,
+            test_df,
+            params,
             visualize=False,
-            save_masks=False,
-            img_width=128,
-            img_height = 128,
-            out_img_width=101,
-            out_img_height=101,
-            img_chan=3,
-            debug=False):
+            save_masks=False):
     """
     Iterate over all test images and do masks prediction
     Arguments:
         net:            The trained network model for inference
-        data_dir:       The directory to look for test data
-        out_dir:        The directory to save results
-        test_ids:       The array with IDs of test images to use
-        subm_file:      The file name of submission file
-        mask_threshold: The minimum probability value to consider a mask pixel white
+        test_df:        The test data samples
+        params:         The dictionary with parameters
         visualize:      The flag to indicate whether to visualize the images as they are processed
         save_masks:     The flag to indicate whether to save the output masks
-        img_width:      The width of the resized image
-        img_height:     The height of the resized image
-        out_img_width:  The width of the original image
-        out_img_height: The height of the original image
-        img_chan:       The number of channels in input plot_image
-        debug:          The flag to indicate whether to show debug information
     """
-    # Get test images
-    print('Getting and resizing test images... ')
-    X_test = np.zeros((len(test_ids), img_height, img_width, img_chan), dtype=np.float64)
-    for n, id_ in enumerate(test_ids):
-        x = load_image(data_dir + '/test/images/' + id_, (img_height, img_width, img_chan))
-        X_test[n] = x
+    print("Start prediction with the number of test image samples:", len(test_df.index))
+    print(params)
 
-    print('Done!')
-
-    #
-    # Check if test data looks all right
-    #
-    #if debug:
-    #    plot_test_check(X_test)
-
-    # transpose HWC to CHW image data format accepted by Torch
-    X_test = list(map(hwc_to_chw, X_test))
+    # Extracting test samples
+    X_test = np.array(test_df.images.tolist()).reshape(-1, params['img_chan'], params['img_height'], params['img_width'])
+    mask_threshold = params['mask_threshold']
 
     # iterate over test images and do inference
     preds_downsampled = []
     for i, img_data in enumerate(X_test):
         mask = inference(net=net,
-                         img_data=img_data,
+                         img_data=np.array(img_data),
                          device=net.torch_dev)
-
-        mask = resize(mask, (out_img_height, out_img_width), mode='constant', preserve_range=True)
         preds_downsampled.append(mask)
 
         if visualize:
-            image = resize(img_data, (img_chan, out_img_height, out_img_width), mode='constant')
-            image = np.transpose(image, (1, 2, 0))
+            image = img_data.squeeze()
             mask_t = (mask > mask_threshold).astype(np.uint8)
-            plot_image_mask(image, mask_t)
+            plot_image_mask(np.dstack((image,image,image)), mask_t)
 
         if save_masks:
-            out_path = args.out_dir + "/masks/"
-            if not os.path.isdir(out_path):
-                os.mkdir(out_path)
+            if not os.path.isdir(params['out_dir']):
+                os.mkdir(params['out_dir'])
 
             mask_t = (mask > mask_threshold).astype(np.uint8)
             tmp = np.squeeze(mask_t).astype(np.float32)
-            imsave(out_path + test_ids[i], np.dstack((tmp,tmp,tmp)))
+            out_path = "%s/masks/%s.png" % (params['out_dir'], test_df.index[i])
+            imsave(out_path, np.dstack((tmp,tmp,tmp)))
 
     # Sanity check
     print(preds_downsampled[0].shape)
 
+    print("Inference complete")
+
     # prepare submission data in CSV file as RLE encoded
-    pred_dict = {fn[:-4]:encode(np.round(preds_downsampled[i])) for i,fn in enumerate(test_ids)}
+    pred_dict = {fn:encode(np.round(preds_downsampled[i] > mask_threshold)) for i,fn in enumerate(test_df.index)}
 
     # save to submission file
+    subm_file = params['out_dir'] + "/" + params['subm_file']
     sub = pd.DataFrame.from_dict(pred_dict,orient='index')
     sub.index.names = ['id']
     sub.columns = ['rle_mask']
-    sub.to_csv(out_dir + "/" + subm_file)
+    sub.to_csv(subm_file)
+
+    print("Results encoded to:", subm_file)
 
 def start_inference(model,
-                    data_dir,
+                    test_df,
                     out_dir,
+                    img_width,
+                    img_height,
+                    img_chan,
+                    mask_threshold,
+                    subm_file="submission.csv",
                     gpu=True,
-                    mask_threshold=0.5,
                     visualize=False,
                     save_masks=False,
-                    img_chan=3,
                     debug=False):
     """
     Starts inference by loading trained network model
     Arguments:
         model:          The trained network model and state dictionary
-        data_dir:       The directory to look for test data
+        test_df:        The test data samples along with names
         out_dir:        The directory to save results
         subm_file:      The file name of submission file
         gpu:            The flag to indicate whether to use GPU for inference
+        img_width:      The width of the resized image
+        img_height:     The height of the resized image
+        img_chan:       The number of channels in input plot_image
         mask_threshold: The minimum probability value to consider a mask pixel white
         visualize:      The flag to indicate whether to visualize the images as they are processed
         save_masks:     The flag to indicate whether to save the output masks
@@ -161,24 +139,30 @@ def start_inference(model,
     else:
         device = torch.device('cpu')
 
-    net = UNetp(n_channels=img_chan, n_classes=1, device=device)
+    net = UNetpRes(n_channels=img_chan,
+                    n_classes=1,
+                    nbf=img_width,
+                    device=device)
 
     print("Loading model %s" % (model))
     net.load_state_dict(torch.load(model))
     net.to(device)
 
-    test_ids = next(os.walk(data_dir + "/test/images"))[2]
-    print("Test images count: %d" % len(test_ids))
+    # Put parameters into dictionary
+    params = {"out_dir":out_dir,
+              "device":device,
+              "img_width":img_width,
+              "img_height":img_height,
+              "img_chan":img_chan,
+              "mask_threshold":mask_threshold,
+              "subm_file":subm_file,
+              "debug":debug}
 
     predict(net=net,
-            data_dir=data_dir,
-            out_dir=out_dir,
-            test_ids=test_ids,
-            mask_threshold=mask_threshold,
+            test_df=test_df,
+            params=params,
             visualize=visualize,
-            save_masks=save_masks,
-            img_chan=img_chan,
-            debug=debug)
+            save_masks=save_masks)
 
 def get_args():
     """
@@ -200,12 +184,16 @@ def get_args():
     parser.add_option('--visualize', '-v', action='store_true',
                         help="Visualize the images as they are processed",
                         default=False)
-    parser.add_option('--save', '-n', action='store_true',
+    parser.add_option('--save', '-s', action='store_true',
                         help="To save the output masks",
                         default=False)
     parser.add_option('--mask-threshold', '-t', dest='mask_threshold', type=float,
-                        help="Minimum probability value to consider a mask pixel white",
-                        default=0.5)
+                        help="Minimum probability value to consider a mask pixel white")
+
+    parser.add_option('--partial', '-p', action='store_true',
+                        help="To run on partial dataset", default=False)
+    parser.add_option('--partial-size', '-d', dest='partial_size', default=100, type='int',
+                      help='The size of partial dataset')
 
     (options, args) = parser.parse_args()
     return options
@@ -217,10 +205,34 @@ if __name__ == "__main__":
     if not os.path.isdir(args.out_dir):
         os.mkdir(args.out_dir)
 
+    # Set values
+    t_img_width=101
+    t_img_height=101
+    t_img_chan=1
+
+    # Load test dataset
+    if args.data_dir != None:
+        # Get test images
+        print('Getting and resizing test images... ')
+        test_df = load_test_dataset(data_dir=args.data_dir,
+                                   img_width=t_img_width,
+                                   img_height=t_img_height,
+                                   img_chan=t_img_chan,
+                                   partial=args.partial,
+                                   part_size=args.partial_size,
+                                   debug=False)
+
+        print('Done!')
+    else:
+        raise ValueError("The input data directory or dataset file not specified")
+
     start_inference(model=args.model,
-                    data_dir=args.data_dir,
+                    test_df=test_df,
                     out_dir=args.out_dir,
                     gpu=args.gpu,
+                    img_width=t_img_width,
+                    img_height=t_img_height,
+                    img_chan=t_img_chan,
                     mask_threshold=args.mask_threshold,
                     visualize=args.visualize,
                     save_masks=args.save,
