@@ -1,4 +1,6 @@
 # The script to load data set and do split it accordingly
+import os
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -62,3 +64,31 @@ def load_train_dataset( data_dir,
 
 
     return x_train, x_valid, y_train, y_valid
+
+def load_test_dataset(data_dir,
+                      img_width,
+                      img_height,
+                      img_chan,
+                      partial=False,
+                      part_size=100,
+                      debug=False):
+    """
+    Loads test data set from provided data directory and perform preprocessing
+    Arguments:
+        data_dir:   The data directory to load test data
+        img_width:  The target image width
+        img_height: The target image height
+        img_chan:   The target image channels
+        partial:    The flag to indicate whether only part of dataset should be loaded (usefull for debug)
+        part_size:  The size of partial dataset to be loaded if specified
+    Returns:
+        The preprocessed dataset with test data samples along with names
+    """
+    test_ids = [name[:-4] for name in next(os.walk(data_dir + "/test/images"))[2]]
+    if partial == True:
+        test_ids = test_ids[:part_size]
+
+    test_df = pd.DataFrame(index=test_ids)
+    test_df["images"] = [np.array(load_image('{}/test/images/{}.png'.format(data_dir, idx), (img_height, img_width))) for idx in test_df.index]
+
+    return test_df

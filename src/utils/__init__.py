@@ -16,3 +16,4 @@ from .data_visualization import plot_depth
 from .data_visualization import plot_best_iou
 
 from .data_set import load_train_dataset
+from .data_set import load_test_dataset
