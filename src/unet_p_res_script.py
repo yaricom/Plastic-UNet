@@ -609,7 +609,8 @@ def train(net, X_train, X_val, y_train, y_val, params):
         next_epoch_finish_time = epoch_time + time.time()
 
         # check if need to force stop training due to time limits or due to epochs limits
-        terminate_training = (params['stop_time'] > 0 and next_epoch_finish_time >= params['stop_time']) or (epoch + 1) == params['epochs']
+        time_is_out = (params['stop_time'] > 0 and next_epoch_finish_time >= params['stop_time'])
+        terminate_training = time_is_out or (epoch + 1) == params['epochs']
 
         if params['debug']:
             print('Epoch finished! Loss: %f, time spent: %d, terminate due to time limits: %s' %
@@ -694,10 +695,12 @@ def train(net, X_train, X_val, y_train, y_val, params):
 
         # Terminate training loop due to time limits
         if terminate_training:
-            print("Training terminated due to the time limits!")
+            print("Training finished!")
             print("Current epoch %d, train loss: %s" % (epoch, epoch_loss))
-            print("Stop time limit: %d, estimated time of next epoch end: %d" %
-                    (params['stop_time'], next_epoch_finish_time))
+            if time_is_out:
+                print("Terminated due to the time limit!")
+                print("Stop time limit: %d, estimated time of next epoch end: %d" %
+                        (params['stop_time'], next_epoch_finish_time))
             break
 
 def start_train(x_train, x_valid, y_train, y_valid,
@@ -974,7 +977,7 @@ model=""
 load_model=False
 use_gpu=True
 training_epochs=250#2000000
-learning_rate=3e-3#3e-4#3e-5
+learning_rate=3e-4#3e-5
 step_lr=1e4#1e5
 save_every=20
 validate_every=1
@@ -986,7 +989,7 @@ t_img_chan=1
 
 plastic_rule='hebb'#'oja'#
 
-max_train_time=14500#21000#19600 #
+max_train_time=5.8*3600#3*3600#14500#21000#19600 #
 
 do_train = True#False#
 do_inference = False#True#
