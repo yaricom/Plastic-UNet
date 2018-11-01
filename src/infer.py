@@ -19,8 +19,11 @@ from utils import hwc_to_chw
 from utils import plot_image_mask
 from utils import plot_test_check
 from utils import load_test_dataset
+from utils import load_train_dataset
 
 from utils import encode
+
+from eval import score_model_best_iou
 
 def inference(net,
               img_data,
@@ -106,11 +109,12 @@ def predict(net,
 
 def start_inference(model,
                     test_df,
+                    X_valid,
+                    y_valid,
                     out_dir,
                     img_width,
                     img_height,
                     img_chan,
-                    mask_threshold,
                     subm_file="submission.csv",
                     gpu=True,
                     visualize=False,
@@ -121,13 +125,14 @@ def start_inference(model,
     Arguments:
         model:          The trained network model and state dictionary
         test_df:        The test data samples along with names
+        X_valid:        The data samples for validation (used for best thershold evaluation)
+        y_valid:        The ground truth data for validation (used for best thershold evaluation)
         out_dir:        The directory to save results
         subm_file:      The file name of submission file
         gpu:            The flag to indicate whether to use GPU for inference
         img_width:      The width of the resized image
         img_height:     The height of the resized image
         img_chan:       The number of channels in input plot_image
-        mask_threshold: The minimum probability value to consider a mask pixel white
         visualize:      The flag to indicate whether to visualize the images as they are processed
         save_masks:     The flag to indicate whether to save the output masks
         debug:          The flag to indicate whether to show debug information
@@ -148,13 +153,22 @@ def start_inference(model,
     net.load_state_dict(torch.load(model))
     net.to(device)
 
+    # Best threshold evaluation
+    print("Score model for best IoU")
+    threshold_best, iou_best = score_model_best_iou(net=net,
+                                                    X_valid=X_valid,
+                                                    y_valid=y_valid,
+                                                    device=device,
+                                                    debug=debug)
+    print("Best threshold: %f, best IoU: %f" % (threshold_best, iou_best))
+
     # Put parameters into dictionary
     params = {"out_dir":out_dir,
               "device":device,
               "img_width":img_width,
               "img_height":img_height,
               "img_chan":img_chan,
-              "mask_threshold":mask_threshold,
+              "mask_threshold":threshold_best,
               "subm_file":subm_file,
               "debug":debug}
 
@@ -221,6 +235,15 @@ if __name__ == "__main__":
                                    partial=args.partial,
                                    part_size=args.partial_size,
                                    debug=False)
+        # Load training dataset
+        x_train, x_valid, y_train, y_valid = load_train_dataset(data_dir=args.data_dir,
+                                                                img_width=t_img_width,
+                                                                img_height=t_img_height,
+                                                                img_chan=t_img_chan,
+                                                                debug=True)
+        if args.partial:
+            x_valid = x_valid[:args.partial_size,:,:,:]
+            y_valid = y_valid[:args.partial_size,:,:,:]
 
         print('Done!')
     else:
@@ -228,12 +251,13 @@ if __name__ == "__main__":
 
     start_inference(model=args.model,
                     test_df=test_df,
+                    X_valid=x_valid,
+                    y_valid=y_valid,
                     out_dir=args.out_dir,
                     gpu=args.gpu,
                     img_width=t_img_width,
                     img_height=t_img_height,
                     img_chan=t_img_chan,
-                    mask_threshold=args.mask_threshold,
                     visualize=args.visualize,
                     save_masks=args.save,
                     debug=True)
