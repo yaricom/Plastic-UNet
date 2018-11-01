@@ -26,6 +26,9 @@ from torch import optim
 from torch.autograd import Variable
 from torch.autograd import no_grad
 
+# Set some values
+start_neurons=8
+
 def load_image(path, output_shape):
     """
     Loads image under specified path and resize it to conform given output shape
@@ -776,6 +779,7 @@ def start_train(x_train, x_valid, y_train, y_valid,
 
     # Create network structure
     net = UNetpRes(n_channels=params['im_chan'],
+                    neurons=start_neurons,
                     n_classes=1,
                     nbf=img_width,
                     batch_norm=False,
@@ -908,11 +912,12 @@ def predict(net,
 
 def start_inference(model,
                     test_df,
+                    X_valid,
+                    y_valid,
                     out_dir,
                     img_width,
                     img_height,
                     img_chan,
-                    mask_threshold,
                     subm_file="submission.csv",
                     gpu=True,
                     visualize=False,
@@ -923,13 +928,14 @@ def start_inference(model,
     Arguments:
         model:          The trained network model and state dictionary
         test_df:        The test data samples along with names
+        X_valid:        The data samples for validation (used for best thershold evaluation)
+        y_valid:        The ground truth data for validation (used for best thershold evaluation)
         out_dir:        The directory to save results
         subm_file:      The file name of submission file
         gpu:            The flag to indicate whether to use GPU for inference
         img_width:      The width of the resized image
         img_height:     The height of the resized image
         img_chan:       The number of channels in input plot_image
-        mask_threshold: The minimum probability value to consider a mask pixel white
         visualize:      The flag to indicate whether to visualize the images as they are processed
         save_masks:     The flag to indicate whether to save the output masks
         debug:          The flag to indicate whether to show debug information
@@ -942,6 +948,7 @@ def start_inference(model,
         device = torch.device('cpu')
 
     net = UNetpRes(n_channels=img_chan,
+                    neurons=start_neurons,
                     n_classes=1,
                     nbf=img_width,
                     device=device)
@@ -950,13 +957,22 @@ def start_inference(model,
     net.load_state_dict(torch.load(model))
     net.to(device)
 
+    # Best threshold evaluation
+    print("Score model for best IoU")
+    threshold_best, iou_best = score_model_best_iou(net=net,
+                                                    X_valid=X_valid,
+                                                    y_valid=y_valid,
+                                                    device=device,
+                                                    debug=debug)
+    print("Best threshold: %f, best IoU: %f" % (threshold_best, iou_best))
+
     # Put parameters into dictionary
     params = {"out_dir":out_dir,
               "device":device,
               "img_width":img_width,
               "img_height":img_height,
               "img_chan":img_chan,
-              "mask_threshold":mask_threshold,
+              "mask_threshold":threshold_best,
               "subm_file":subm_file,
               "debug":debug}
 
@@ -965,6 +981,54 @@ def start_inference(model,
             params=params,
             visualize=visualize,
             save_masks=save_masks)
+
+#########################################
+
+def score_model_best_iou(net, X_valid, y_valid, device, debug=False):
+    """
+    Scores the model and do a threshold optimization by the best IoU.
+    Arguments:
+        net:        The network to be evaluated
+        X_valid:    The data samples for validation
+        y_valid:    The ground truth data for validation
+        device:     The Torch device to use
+        debug:      The flag to indicate if debug info should be displayed
+    Returns:
+        (threshold_best, iou_best) the threshold for best IoU metric and best IoU metric value
+    """
+    net.eval()
+
+    with torch.no_grad():
+        hebb = net.initialZeroHebb()
+
+        # Find predictions for validation
+        preds_valid = []
+        for x in X_valid:
+            t_img = torch.from_numpy(np.array([x.astype(np.float32)])).to(device)
+
+            # We do not learn plasticity within validation
+            mask_pred, _ = net(Variable(t_img, requires_grad=False), Variable(hebb, requires_grad=False))
+
+            preds_valid.append(mask_pred.cpu().numpy())
+
+        # Scoring model, choose threshold by validation data
+        thresholds_ori = np.linspace(0.3, 0.7, 31)
+        # Reverse sigmoid function: Use code below because the  sigmoid activation was removed
+        thresholds = np.log(thresholds_ori/(1-thresholds_ori))
+
+        ious = np.array([iou_metric_batch(y_valid, preds_valid > threshold) for threshold in thresholds])
+        if debug:
+            print(ious)
+
+        # instead of using default 0 as threshold, use validation data to find the best threshold.
+        threshold_best_index = np.argmax(ious)
+        iou_best = ious[threshold_best_index]
+        threshold_best = thresholds[threshold_best_index]
+
+        if debug:
+            plot_best_iou(thresholds=thresholds, ious=ious)
+
+        return threshold_best, iou_best
 
 #########################################
 # Do training
@@ -989,7 +1053,7 @@ t_img_chan=1
 
 plastic_rule='hebb'#'oja'#
 
-max_train_time=5.8*3600#3*3600#14500#21000#19600 #
+max_train_time=5*3600#3*3600#14500#21000#19600 #
 
 do_train = True#False#
 do_inference = False#True#
@@ -997,17 +1061,15 @@ do_inference = False#True#
 short_run = False#True#
 short_size = 100
 
-mask_threshold=0.5
+# Load training dataset
+x_train, x_valid, y_train, y_valid = load_train_dataset(data_dir=data_dir,
+                                                        img_width=t_img_width,
+                                                        img_height=t_img_height,
+                                                        img_chan=t_img_chan,
+                                                        debug=show_debug)
 
 if do_train:
-    print("Starting training with rule:", plastic_rule)
-
-    # Load training dataset
-    x_train, x_valid, y_train, y_valid = load_train_dataset(data_dir=data_dir,
-                                                            img_width=t_img_width,
-                                                            img_height=t_img_height,
-                                                            img_chan=t_img_chan,
-                                                            debug=show_debug)
+    print("Starting training with rule: %s, start neurons: %d" % (plastic_rule, start_neurons))
 
     # First test on small dataset
     if short_run:
@@ -1040,11 +1102,11 @@ if do_train:
 ###################################
 # Do prediction
 ###################################
-model_file=input_data_dir + "/tgs-plastic-model/train_net_hebb-3.pth"
-subm_file="submission_hebb-3.csv"
+model_file=input_data_dir + "/tgs-unet-plastic-res-hebb/train_net_res.pth"
+subm_file="submission_res-1.csv"
 
 if do_inference:
-    print("Starting inference with model:", model_file)
+    print("Starting inference with model:%s, start neurons: %d" % (model_file, start_neurons))
 
     print('Getting and resizing test images... ')
     test_df = load_test_dataset(data_dir=data_dir,
@@ -1058,13 +1120,14 @@ if do_inference:
 
     start_inference(model=model_file,
                     test_df=test_df,
+                    X_valid=x_valid,
+                    y_valid=y_valid,
                     out_dir=output_dir,
                     subm_file=subm_file,
                     gpu=use_gpu,
                     img_width=t_img_width,
                     img_height=t_img_height,
                     img_chan=t_img_chan,
-                    mask_threshold=mask_threshold,
                     visualize=False,
                     save_masks=False,
                     debug=show_debug)
